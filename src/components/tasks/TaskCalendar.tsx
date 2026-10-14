@@ -54,7 +54,7 @@ export default function TaskCalendar({ tasks, onOpen, seeAll }: { tasks: TaskDTO
 
   return (
     <div className="flex h-full flex-col">
-      <div className="mb-3 flex items-center gap-2">
+      <div className="mb-3 flex flex-wrap items-center gap-2">
         <button className="btn-outline px-2" onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1, 1))}>
           <ChevronLeft className="h-4 w-4" />
         </button>
@@ -94,7 +94,8 @@ export default function TaskCalendar({ tasks, onOpen, seeAll }: { tasks: TaskDTO
           {undated > 0 && <span className="ml-auto">{undated} task{undated > 1 ? "s" : ""} without a date (not shown)</span>}
         </div>
       )}
-      <div className="grid grid-cols-7 border-l border-t border-line text-[12px]">
+      <div className="scroll-thin overflow-x-auto">
+      <div className="grid min-w-[700px] grid-cols-7 border-l border-t border-line text-[12px]">
         {WEEKDAYS.map((w) => (
           <div key={w} className="border-b border-r border-line px-2 py-1.5 font-medium text-muted">{w}</div>
         ))}
@@ -127,6 +128,7 @@ export default function TaskCalendar({ tasks, onOpen, seeAll }: { tasks: TaskDTO
           );
         })}
       </div>
+    </div>
     </div>
   );
 }

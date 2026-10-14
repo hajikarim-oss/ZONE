@@ -9,6 +9,14 @@ const inter = Inter({ subsets: ["latin"], variable: "--font-inter", display: "sw
 export const metadata: Metadata = {
   title: "Post Prod Panel — TheBoredMonkey",
   description: "Projects, team and brand tracking for The Bored Monkey post-production.",
+  appleWebApp: { capable: true, title: "Post Prod", statusBarStyle: "black-translucent" },
+};
+
+export const viewport = {
+  width: "device-width",
+  initialScale: 1,
+  viewportFit: "cover",
+  themeColor: "#1e1f21",
 };
 
 // The light/dark choice lives in a "theme" cookie (written by ThemeProvider),

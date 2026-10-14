@@ -27,7 +27,7 @@ type Props = {
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[130px_1fr] items-center gap-2 py-0.5">
+    <div className="grid grid-cols-[110px_1fr] items-center gap-2 py-0.5 md:grid-cols-[130px_1fr]">
       <div className="text-[12px] text-muted">{label}</div>
       <div className="min-w-0">{children}</div>
     </div>
@@ -111,7 +111,7 @@ export default function TaskPanel({ task: t, people, brands, seeAll, admin, view
   }
 
   return (
-    <aside className="flex h-full w-[560px] shrink-0 flex-col border-l border-line bg-surface shadow-panel">
+    <aside className="fixed inset-0 z-40 flex flex-col bg-surface md:static md:z-auto md:h-full md:w-[560px] md:shrink-0 md:border-l md:border-line md:shadow-panel">
       {/* toolbar */}
       <div className="flex items-center gap-2 border-b border-line px-4 py-2.5">
         <StagePill t={t} />
@@ -145,7 +145,7 @@ export default function TaskPanel({ task: t, people, brands, seeAll, admin, view
       </div>
 
       <div className="scroll-thin flex-1 overflow-y-auto">
-        <div className="px-6 pb-4 pt-5">
+        <div className="px-4 pb-4 pt-5 md:px-6">
           <div className="mb-1 text-[11px] text-muted">{t.code} · added {fmtDate(t.addedOn, true)}</div>
           {seeAll ? (
             <textarea
@@ -252,7 +252,7 @@ export default function TaskPanel({ task: t, people, brands, seeAll, admin, view
         </div>
 
         {/* updates / activity */}
-        <div className="border-t border-line bg-canvas/50 px-6 pb-6 pt-3">
+        <div className="border-t border-line bg-canvas/50 px-4 pb-6 pt-3 md:px-6">
           <div className="mb-3 flex gap-4 text-[13px]">
             {(["updates", "activity"] as const).map((k) => (
               <button

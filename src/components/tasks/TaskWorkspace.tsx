@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import TaskBoard from "./TaskBoard";
 import TaskCalendar from "./TaskCalendar";
 import TaskList, { type Group } from "./TaskList";
+import TaskCards from "./TaskCards";
 import TaskPanel from "./TaskPanel";
 
 type View = "list" | "board" | "calendar";
@@ -192,11 +193,11 @@ export default function TaskWorkspace(props: Props) {
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
         {/* header */}
-        <header className="border-b border-line px-6 pt-4">
+        <header className="border-b border-line px-4 pt-4 md:px-6">
           <div className="flex items-center gap-3">
             {props.accentColor && <span className="h-7 w-7 rounded-md" style={{ background: props.accentColor }} />}
             <div className="min-w-0">
-              <h1 className="truncate text-[20px] font-semibold tracking-tight">{props.title}</h1>
+              <h1 className="truncate text-[18px] font-semibold tracking-tight md:text-[20px]">{props.title}</h1>
               {props.subtitle && <p className="text-[12px] text-muted">{props.subtitle}</p>}
             </div>
           </div>
@@ -218,35 +219,35 @@ export default function TaskWorkspace(props: Props) {
         </header>
 
         {/* toolbar */}
-        <div data-tour="toolbar" className="flex flex-wrap items-center gap-2 border-b border-line px-6 py-2">
+        <div data-tour="toolbar" className="scroll-thin flex items-center gap-2 overflow-x-auto border-b border-line px-4 py-2 md:flex-wrap md:overflow-visible md:px-6">
           {canCreate && (
-            <button data-tour="add-task" className="btn-primary" onClick={() => setAdding((a) => !a)}>
+            <button data-tour="add-task" className="btn-primary shrink-0" onClick={() => setAdding((a) => !a)}>
               <Plus className="h-3.5 w-3.5" /> Add task
             </button>
           )}
-          <div className="relative">
+          <div className="relative shrink-0">
             <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" className="field-input w-48 py-1 pl-7" />
+            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" className="field-input w-36 py-1 pl-7 md:w-48" />
           </div>
           {!props.fixedBrandId && (
-            <select value={brandF} onChange={(e) => setBrandF(e.target.value)} className="field-input w-auto py-1">
+            <select value={brandF} onChange={(e) => setBrandF(e.target.value)} className="field-input w-auto shrink-0 py-1">
               <option value="">All brands</option>
               {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
             </select>
           )}
           {viewer.seeAll && (
-            <select value={personF} onChange={(e) => setPersonF(e.target.value)} className="field-input w-auto py-1">
+            <select value={personF} onChange={(e) => setPersonF(e.target.value)} className="field-input w-auto shrink-0 py-1">
               <option value="">Everyone</option>
               <option value="none">Unassigned</option>
               {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
             </select>
           )}
-          <select value={prioF} onChange={(e) => setPrioF(e.target.value)} className="field-input w-auto py-1">
+          <select value={prioF} onChange={(e) => setPrioF(e.target.value)} className="field-input w-auto shrink-0 py-1">
             <option value="">Any priority</option>
             {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
           </select>
           {view === "list" && (
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="field-input w-auto py-1">
+            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="field-input w-auto shrink-0 py-1">
               <option value="stage">Group: Stage</option>
               {!props.fixedBrandId && <option value="brand">Group: Brand</option>}
               {viewer.seeAll && <option value="assignee">Group: Assignee</option>}
@@ -255,17 +256,17 @@ export default function TaskWorkspace(props: Props) {
             </select>
           )}
           {mode !== "archive" && (
-            <label className="ml-auto flex cursor-pointer items-center gap-1.5 text-[13px] text-muted">
+            <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13px] text-muted">
               <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} className="accent-[#5b3fd1]" />
               Show delivered & closed
             </label>
           )}
-          <span className={cn("text-[12px] text-muted", mode === "archive" && "ml-auto")}>{filtered.length} tasks</span>
+          <span className={cn("shrink-0 whitespace-nowrap text-[12px] text-muted", mode === "archive" && "ml-auto")}>{filtered.length} tasks</span>
         </div>
 
         {adding && canCreate && (
-          <form onSubmit={submitNew} className="flex flex-wrap items-center gap-2 border-b border-line bg-canvas px-6 py-2.5">
-            <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Task name" className="field-input min-w-[240px] flex-1" />
+          <form onSubmit={submitNew} className="flex flex-wrap items-center gap-2 border-b border-line bg-canvas px-4 py-2.5 md:px-6">
+            <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Task name" className="field-input min-w-[200px] flex-1" />
             {!props.fixedBrandId && (
               <select value={newBrand} onChange={(e) => setNewBrand(e.target.value)} className="field-input w-auto">
                 <option value="">Brand</option>
@@ -290,13 +291,28 @@ export default function TaskWorkspace(props: Props) {
           </form>
         )}
 
-        <div className="scroll-thin min-h-0 flex-1 overflow-auto px-6 pb-10 pt-1">
+        <div className="scroll-thin min-h-0 flex-1 overflow-auto px-3 pb-10 pt-1 md:px-6">
           {view === "list" && (
             filtered.length === 0 ? (
               <div className="py-20 text-center text-[13px] text-muted">
                 {mode === "mine" ? "Nothing on your plate right now." : "No tasks match these filters."}
               </div>
             ) : (
+              <>
+              <div className="md:hidden">
+                <TaskCards
+                  groups={groups}
+                  seeAll={viewer.seeAll}
+                  viewerId={viewer.id}
+                  statusField={statusField}
+                  showAssignee={mode !== "mine"}
+                  showBrand={!props.fixedBrandId}
+                  selectedId={selectedId}
+                  onOpen={(id) => open(id)}
+                  onUpdate={onUpdate}
+                />
+              </div>
+              <div className="hidden md:block">
               <TaskList
                 groups={groups}
                 people={people}
@@ -310,6 +326,8 @@ export default function TaskWorkspace(props: Props) {
                 onOpen={(id) => open(id)}
                 onUpdate={onUpdate}
               />
+              </div>
+              </>
             )
           )}
           {view === "board" && <div className="h-full pt-3"><TaskBoard tasks={filtered} showDone={showDone} selectedId={selectedId} onOpen={(id) => open(id)} /></div>}

@@ -17,7 +17,7 @@ export default async function BrandsPage() {
   });
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-8 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-5 md:px-8 md:py-8">
         <h1 className="text-[22px] font-semibold tracking-tight">Brands & clients</h1>
         <p className="mt-1 max-w-2xl text-[13px] text-muted">
           Add a brand and it shows up in every Brand dropdown straight away. Give the brand's POC a client login and they

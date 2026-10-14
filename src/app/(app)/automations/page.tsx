@@ -50,7 +50,7 @@ export default async function AutomationsPage() {
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-8 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-5 md:px-8 md:py-8">
         <h1 className="text-[22px] font-semibold tracking-tight">Automations</h1>
         <p className="mt-1 max-w-2xl text-[13px] text-muted">
           These replace the Apps Script triggers. Instant ones fire the moment someone changes a task. Daily ones run every
@@ -75,8 +75,8 @@ export default async function AutomationsPage() {
 
         <section className="mt-8">
           <h2 className="mb-2 flex items-center gap-2 text-[15px] font-semibold"><Zap className="h-4 w-4 text-accent" /> Instant (when a task changes)</h2>
-          <div className="overflow-hidden rounded-lg border border-line">
-            <table className="w-full text-[13px]">
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full min-w-[600px] text-[13px]">
               <thead className="bg-canvas text-left text-[12px] text-muted">
                 <tr>
                   <th className="px-4 py-2 font-medium">When</th>
@@ -102,8 +102,8 @@ export default async function AutomationsPage() {
             <h2 className="flex items-center gap-2 text-[15px] font-semibold"><CalendarClock className="h-4 w-4 text-accent" /> Daily at 8:00 AM IST</h2>
             <RunNowButton />
           </div>
-          <div className="overflow-hidden rounded-lg border border-line">
-            <table className="w-full text-[13px]">
+          <div className="overflow-x-auto rounded-lg border border-line">
+            <table className="w-full min-w-[600px] text-[13px]">
               <thead className="bg-canvas text-left text-[12px] text-muted">
                 <tr>
                   <th className="px-4 py-2 font-medium">Automation</th>
@@ -129,7 +129,7 @@ export default async function AutomationsPage() {
 
         <section className="mt-8">
           <h2 className="mb-2 text-[15px] font-semibold">Recent runs</h2>
-          <div className="overflow-hidden rounded-lg border border-line">
+          <div className="overflow-x-auto rounded-lg border border-line">
             {runs.length === 0 && <p className="px-4 py-6 text-center text-[13px] text-muted">No runs yet.</p>}
             {runs.map((r) => {
               let res: Record<string, unknown> = {};

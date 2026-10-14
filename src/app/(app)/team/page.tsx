@@ -16,7 +16,7 @@ export default async function TeamPage() {
   });
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-5xl px-8 py-8">
+      <div className="mx-auto max-w-5xl px-4 py-5 md:px-8 md:py-8">
         <h1 className="text-[22px] font-semibold tracking-tight">Team</h1>
         <p className="mt-1 max-w-2xl text-[13px] text-muted">
           Add someone here and they get a welcome email and can sign in with that Google account straight away. Set someone

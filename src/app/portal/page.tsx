@@ -34,8 +34,8 @@ export default async function PortalPage() {
           {title} <span className="ml-1 text-[13px] font-normal text-muted">{items.length}</span>
         </h2>
         {hint && <p className="text-[12px] text-muted">{hint}</p>}
-        <div className="mt-2 overflow-hidden rounded-lg border border-line">
-          <table className="w-full text-[13px]">
+        <div className="mt-2 overflow-x-auto rounded-lg border border-line">
+          <table className="w-full min-w-[600px] text-[13px]">
             <thead className="bg-canvas text-left text-[12px] text-muted">
               <tr>
                 <th className="px-4 py-2 font-medium">Content</th>
@@ -73,7 +73,7 @@ export default async function PortalPage() {
   return (
     <div className="min-h-screen bg-surface">
       <header className="border-b border-line">
-        <div className="mx-auto flex max-w-5xl items-center gap-3 px-6 py-4">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-3 px-4 py-4 md:px-6">
           <span className="h-8 w-8 rounded-md" style={{ background: brand.color }} />
           <div className="leading-tight">
             <div className="text-[15px] font-semibold">{brand.name} × TBM</div>
@@ -87,7 +87,7 @@ export default async function PortalPage() {
           </div>
         </div>
       </header>
-      <main className="mx-auto max-w-5xl px-6 pb-16">
+      <main className="mx-auto max-w-5xl px-4 pb-16 md:px-6">
         <div className="mt-6 grid grid-cols-3 gap-3">
           {[
             ["Awaiting your review", review.length],

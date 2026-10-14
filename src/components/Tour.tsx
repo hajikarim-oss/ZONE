@@ -375,6 +375,11 @@ export default function Tour({ userId, name, role }: Props) {
     let raf = 0;
     let timer: ReturnType<typeof setTimeout>;
     const measure = () => {
+      // Phones: the sidebar is tucked away, so show every step as a centred card
+      if (window.innerWidth < 768) {
+        setRect(null);
+        return;
+      }
       const el = document.querySelector<HTMLElement>(`[data-tour="${step.target}"]`);
       if (el) {
         el.scrollIntoView({ block: "nearest" });

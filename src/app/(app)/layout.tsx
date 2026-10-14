@@ -34,7 +34,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         myOpen={myOpen}
         brands={brands}
       />
-      <main className="flex h-dvh min-w-0 flex-1 flex-col overflow-hidden bg-surface">{children}</main>
+      <main className="flex h-dvh min-w-0 flex-1 flex-col overflow-hidden bg-surface pt-14 md:pt-0">{children}</main>
       <Tour userId={me.id} name={me.name} role={me.role} />
     </div>
   );

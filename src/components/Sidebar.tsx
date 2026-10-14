@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { signOut } from "next-auth/react";
-import { Bell, CheckCheck, CheckCircle2, CircleHelp, Home, LayoutList, LogOut, Tags, Users, Zap } from "lucide-react";
+import { Bell, CheckCheck, CheckCircle2, CircleHelp, Home, LayoutList, LogOut, Menu, Tags, Users, X, Zap } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
 import Logo from "@/components/Logo";
@@ -52,6 +52,10 @@ export default function Sidebar({ name, email, role, seeAll, admin, unread, myOp
   const path = usePathname();
   const on = (p: string) => path === p || path.startsWith(p + "/");
 
+  // Phone: sidebar is a slide-in drawer opened from the top bar
+  const [drawer, setDrawer] = useState(false);
+  useEffect(() => setDrawer(false), [path]);
+
   // Live unread count: refreshes every 30s, when the tab regains focus and on navigation.
   const [unreadLive, setUnreadLive] = useState(unread);
   useEffect(() => setUnreadLive(unread), [unread]);
@@ -73,7 +77,30 @@ export default function Sidebar({ name, email, role, seeAll, admin, unread, myOp
   }, [path]);
 
   return (
-    <aside className="flex h-dvh w-60 shrink-0 flex-col border-r border-line bg-side text-side-fg">
+    <>
+      {/* Phone top bar (hidden on laptop) */}
+      <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-side px-3 md:hidden">
+        <button onClick={() => setDrawer(true)} className="relative rounded-md p-2 text-side-fg hover:bg-side-hover" aria-label="Open menu">
+          <Menu className="h-5 w-5" />
+          {unreadLive > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
+        </button>
+        <Link href="/home" className="flex min-w-0 items-center gap-2">
+          <Logo className="h-auto w-[120px]" />
+        </Link>
+        <span className="ml-auto truncate text-[10px] font-semibold uppercase tracking-[0.14em] text-side-muted">Post Prod Panel</span>
+      </div>
+      {drawer && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setDrawer(false)} />}
+
+    <aside
+      className={cn(
+        "flex h-dvh w-72 shrink-0 flex-col border-r border-line bg-side text-side-fg md:w-60",
+        "fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:static md:z-auto md:translate-x-0",
+        drawer ? "translate-x-0 shadow-pop" : "-translate-x-full",
+      )}
+    >
+      <button onClick={() => setDrawer(false)} className="absolute right-2 top-3 rounded-md p-2 text-side-muted hover:bg-side-hover md:hidden" aria-label="Close menu">
+        <X className="h-5 w-5" />
+      </button>
       <Link href="/home" className="block px-4 pb-4 pt-5">
         <Logo className="h-auto w-[176px]" />
         <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-side-muted">Post Prod Panel</div>
@@ -125,5 +152,6 @@ export default function Sidebar({ name, email, role, seeAll, admin, unread, myOp
         </button>
       </div>
     </aside>
+    </>
   );
 }

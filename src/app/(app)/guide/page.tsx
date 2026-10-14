@@ -20,8 +20,8 @@ function Section({ id, title, children }: { id: string; title: string; children:
 
 function Table({ head, rows }: { head: string[]; rows: (string | React.ReactNode)[][] }) {
   return (
-    <div className="overflow-hidden rounded-lg border border-line">
-      <table className="w-full text-[13px]">
+    <div className="overflow-x-auto rounded-lg border border-line">
+      <table className="w-full min-w-[600px] text-[13px]">
         <thead className="bg-canvas text-left text-[12px] text-muted">
           <tr>{head.map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
         </thead>
@@ -58,7 +58,7 @@ export default async function GuidePage() {
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-8 py-8">
+      <div className="mx-auto max-w-3xl px-4 py-5 md:px-8 md:py-8">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
             <h1 className="text-[24px] font-semibold tracking-tight">Help &amp; guide</h1>

@@ -141,8 +141,8 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
     <div className="mt-6 space-y-4">
       <AddForm />
       {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{error}</p>}
-      <div className="overflow-hidden rounded-lg border border-line">
-        <table className="w-full text-[13px]">
+      <div className="overflow-x-auto rounded-lg border border-line">
+        <table className="w-full min-w-[600px] text-[13px]">
           <thead className="bg-canvas text-left text-[12px] text-muted">
             <tr>
               <th className="px-3 py-2 font-medium">Name</th>

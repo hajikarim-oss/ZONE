@@ -79,7 +79,7 @@ export default async function HomePage() {
 
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl px-8 py-8">
+      <div className="mx-auto max-w-6xl px-4 py-5 md:px-8 md:py-8">
         <p className="text-[13px] text-muted">
           {new Date().toLocaleDateString("en-IN", { weekday: "long", day: "numeric", month: "long", timeZone: "Asia/Kolkata" })}
         </p>
@@ -122,8 +122,8 @@ export default async function HomePage() {
           {seeAll && (
             <section>
               <h2 className="mb-2 text-[15px] font-semibold">Team status</h2>
-              <div className="overflow-hidden rounded-lg border border-line">
-                <table className="w-full text-[13px]">
+              <div className="overflow-x-auto rounded-lg border border-line">
+                <table className="w-full min-w-[600px] text-[13px]">
                   <thead className="bg-canvas text-left text-[12px] text-muted">
                     <tr>
                       <th className="px-3 py-2 font-medium">Name</th>
@@ -164,8 +164,8 @@ export default async function HomePage() {
           <section className="mt-8">
             <h2 className="mb-1 text-[15px] font-semibold">Delay tracker</h2>
             {seeAll && <p className="mb-2 text-[12px] text-muted">Team late = past the team deadline while the work is with us. Waiting on brand = cut is with the client past their deadline.</p>}
-            <div className="overflow-hidden rounded-lg border border-line">
-              <table className="w-full text-[13px]">
+            <div className="overflow-x-auto rounded-lg border border-line">
+              <table className="w-full min-w-[600px] text-[13px]">
                 <thead className="bg-canvas text-left text-[12px] text-muted">
                   <tr>
                     <th className="px-3 py-2 font-medium">Project</th>

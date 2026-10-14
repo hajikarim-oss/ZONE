@@ -10,7 +10,7 @@ export default async function InboxPage() {
   const unread = items.filter((i) => !i.read).length;
   return (
     <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-3xl px-8 py-8">
+      <div className="mx-auto max-w-3xl px-4 py-5 md:px-8 md:py-8">
         <div className="mb-5 flex items-center justify-between">
           <h1 className="text-[22px] font-semibold tracking-tight">Notifications</h1>
           {unread > 0 && <MarkReadButton />}
