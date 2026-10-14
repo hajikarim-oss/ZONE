@@ -1,0 +1,44 @@
+{
+  "name": "tbm-post-production",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack",
+    "build": "next build",
+    "start": "next start",
+    "postinstall": "prisma generate",
+    "db:push": "prisma db push",
+    "db:seed": "tsx prisma/seed.ts",
+    "import:sheets": "tsx scripts/import-from-sheets.ts",
+    "db:studio": "prisma studio",
+    "reset:data": "tsx scripts/reset-data.ts"
+  },
+  "prisma": {
+    "seed": "tsx prisma/seed.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^5.20.0",
+    "bcryptjs": "^2.4.3",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.31.0",
+    "next": "16.3.0",
+    "next-auth": "^4.24.15",
+    "nodemailer": "^7.0.13",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "tailwind-merge": "^3.7.0"
+  },
+  "devDependencies": {
+    "@types/bcryptjs": "^2.4.6",
+    "@types/node": "^20.14.0",
+    "@types/nodemailer": "^8.0.2",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "prisma": "^5.20.0",
+    "tailwindcss": "^3.4.4",
+    "tsx": "^4.16.2",
+    "typescript": "^5.5.3"
+  }
+}

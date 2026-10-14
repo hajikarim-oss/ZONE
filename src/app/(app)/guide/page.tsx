@@ -1,0 +1,265 @@
+import { requireTeamPage } from "@/lib/auth";
+import { canSeeAll, isAdmin } from "@/lib/rbac";
+import {
+  ARCHIVE_AFTER_DAYS, BRAND_NUDGE_DAYS, DEADLINE_ALERT_DAYS, ESCALATE_AFTER, REVISION_ALERT_ROUND, STALE_DAYS,
+} from "@/lib/constants";
+import { STAGE_GROUPS } from "@/lib/status";
+import TourButton from "./tour-button";
+
+// Written guide to the panel: how the work flows, what each status means,
+// who is notified about what, and the admin side. Shown per role.
+
+function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+  return (
+    <section id={id} className="scroll-mt-6 border-t border-line pt-7">
+      <h2 className="mb-3 text-[17px] font-semibold tracking-tight">{title}</h2>
+      <div className="space-y-3 text-[13.5px] leading-relaxed text-ink/90">{children}</div>
+    </section>
+  );
+}
+
+function Table({ head, rows }: { head: string[]; rows: (string | React.ReactNode)[][] }) {
+  return (
+    <div className="overflow-hidden rounded-lg border border-line">
+      <table className="w-full text-[13px]">
+        <thead className="bg-canvas text-left text-[12px] text-muted">
+          <tr>{head.map((h) => <th key={h} className="px-3 py-2 font-medium">{h}</th>)}</tr>
+        </thead>
+        <tbody>
+          {rows.map((r, i) => (
+            <tr key={i} className="border-t border-line/70 align-top">
+              {r.map((c, j) => <td key={j} className={j === 0 ? "px-3 py-2 font-medium" : "px-3 py-2 text-ink/80"}>{c}</td>)}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+export default async function GuidePage() {
+  const me = await requireTeamPage();
+  const seeAll = canSeeAll(me);
+  const admin = isAdmin(me);
+
+  const toc: [string, string][] = [
+    ["start", "Getting started"],
+    ["roles", "Who sees what"],
+    ["day", "Your daily routine"],
+    ["flow", "The workflow & statuses"],
+    ["stages", "Stages, late tags & deadlines"],
+    ["updates", "Updates, links & history"],
+    ["notifications", "Notifications & emails"],
+    ...(seeAll ? ([["managing", "Managing projects"]] as [string, string][]) : []),
+    ...(admin ? ([["admin", "Admin: team, brands & automations"]] as [string, string][]) : []),
+    ["clients", "What brands see"],
+    ["faq", "FAQ"],
+  ];
+
+  return (
+    <div className="scroll-thin h-full overflow-y-auto">
+      <div className="mx-auto max-w-3xl px-8 py-8">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-[24px] font-semibold tracking-tight">Help &amp; guide</h1>
+            <p className="mt-1 text-[13px] text-muted">How the Post Prod Panel works, from first task to final delivery.</p>
+          </div>
+          <TourButton />
+        </div>
+
+        <nav className="mt-6 grid grid-cols-1 gap-x-6 gap-y-1 rounded-lg bg-canvas p-4 text-[13px] sm:grid-cols-2">
+          {toc.map(([id, label], k) => (
+            <a key={id} href={`#${id}`} className="text-ink/80 hover:text-accent hover:underline">
+              {k + 1}. {label}
+            </a>
+          ))}
+        </nav>
+
+        <div className="mt-8 space-y-10 pb-16">
+          <Section id="start" title="1. Getting started">
+            <p>
+              The panel replaces the Master control sheet, the Team sheet (one tab per person) and the per-brand sheets. Everyone
+              works on the same task records, so a change made by anyone shows up for everyone straight away. There is no Save
+              button and nothing to sync.
+            </p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li><b>Sign in</b> with your TBM Google account (freelancers: the Gmail your lead added). An admin has to add you on the Team page first.</li>
+              <li>The <b>sidebar</b> has Home, My tasks, Notifications{seeAll ? ", All projects" : ""}, your brands{seeAll ? ", the Manage section" : ""} and this guide.</li>
+              <li>Switch <b>light / dark mode</b> with the moon / sun button at the bottom of the sidebar.</li>
+            </ul>
+          </Section>
+
+          <Section id="roles" title="2. Who sees what">
+            <Table
+              head={["Role", "Sees", "Can change"]}
+              rows={[
+                ["Team member", "Only their own tasks, their own deadline (the team deadline), the context from their lead, updates and history.", "Status, revision round and shoot status on their own tasks; post updates and links."],
+                ["Manager", "Every project and brand, both deadlines, internal notes, team status and delay tracker, Completed.", "Everything on every task; add tasks; move tasks to Completed."],
+                ["Admin", "Everything managers see, plus Team, Brands & clients and Automations.", "Everything, plus people, roles, Active/Inactive, brands, client logins and deleting tasks."],
+                ["Brand client", "Only their brand's content, in friendly wording, with the revision round and delivery date.", "Nothing; view only."],
+              ]}
+            />
+            <p className="text-muted">Team members never see the client deadline or internal notes; they aren't even sent to their browser.</p>
+          </Section>
+
+          <Section id="day" title="3. Your daily routine">
+            <ol className="list-decimal space-y-1.5 pl-5">
+              <li>Open <b>Home</b>: check what's due in the next 7 days and anything tagged late.</li>
+              <li>Check <b>Notifications</b> (the purple number in the sidebar) for new assignments.</li>
+              <li>Open <b>My tasks</b>. For every task you touched today, move the <b>Edit status</b> forward (right in the row, or in the task panel).</li>
+              <li>Post a short <b>update</b> or Drive link in the task panel when you share a cut, render, or hit a blocker.</li>
+              {seeAll && <li>Managers: scan <b>All projects</b> grouped by brand, and the <b>Delay tracker</b> on Home, every morning.</li>}
+            </ol>
+            <p>
+              If a task hasn't been updated for {STALE_DAYS} day, you'll get a reminder at 8:00 AM. Keeping statuses current is
+              what keeps reminders away.
+            </p>
+          </Section>
+
+          <Section id="flow" title="4. The workflow & statuses">
+            <p>Each task has a pipeline. These are the dropdowns in the task panel, in order:</p>
+            <Table
+              head={["Step", "Options", "Notes"]}
+              rows={[
+                ["Brief", "Not Started → Brief Received → Brief Call Done", ""],
+                ["Concept / script", "Not Started → In Progress → Sent to Client → Approved", "Creative team members update this one; it's the status column in their list."],
+                ["Pre-pro", "Not Started → In Progress → Complete", ""],
+                ["Shoot", "Not Started → Scheduled → Done → Footage Received", "Footage Received means editing can start."],
+                ["Edit status", "Not Started → In Progress → First Cut Ready → First Cut Sent → In Review → Internal Revision R1–R4 / External Revision R1–R4 → Final Approved", "The main status editors update."],
+                ["Revision round", "0–4", "Set automatically by External Revision Rn; can also be set by hand."],
+                ["Client review", "Pending / Received / NA", ""],
+                ["Final approval", "Pending / Approved / NA", "Set to Approved automatically when Edit status becomes Final Approved."],
+                ["Delivery", "Not Started → Files Sent → Invoice Raised → Project Closed", "Files Sent = delivered. Project Closed = done; it moves to Completed after 30 days."],
+              ]}
+            />
+            <p><b>Internal revision</b> = changes asked for by TBM before the brand sees it. <b>External revision</b> = changes asked for by the brand.</p>
+          </Section>
+
+          <Section id="stages" title="5. Stages, late tags & deadlines">
+            <p>The coloured <b>Stage</b> on every task is worked out from the statuses above, so you never set it by hand:</p>
+            <div className="flex flex-wrap gap-1.5">
+              {STAGE_GROUPS.map((g) => (
+                <span key={g.key} className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px]" style={{ background: g.dot + "2b" }}>
+                  <span className="h-1.5 w-1.5 rounded-full" style={{ background: g.dot }} />
+                  {g.label}
+                </span>
+              ))}
+            </div>
+            <ul className="list-disc space-y-1 pl-5">
+              <li><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-700">Team late · Nd</span> past the {seeAll ? "team" : ""} deadline while the work is with us.</li>
+              <li><span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Waiting on brand · Nd</span> the cut has been sent / is in review and the brand hasn't come back.</li>
+            </ul>
+            {seeAll ? (
+              <p>
+                <b>Team deadline</b> is the internal due date (what the team sees). <b>Client deadline</b> is what was promised to
+                the brand (what the brand sees as "Delivery date"). Every time either is pushed, the task counts it.
+              </p>
+            ) : (
+              <p>Your <b>deadline</b> is the date your lead needs the work by. If it changes, the task shows how many times it was pushed.</p>
+            )}
+          </Section>
+
+          <Section id="updates" title="6. Updates, links & history">
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Every task panel has <b>Updates &amp; links</b> at the bottom. Write a note or paste a Drive link and press <b>Ctrl + Enter</b>. Links become clickable.</li>
+              <li>Posting an update counts as updating the task (it resets your reminders).</li>
+              <li><b>Activity</b> shows every change: who changed which field, from what, to what, and when.</li>
+              <li><b>Context for the team</b> is the brief from your lead{seeAll ? " (you write it; team members can read it)" : " (read-only for you)"}.</li>
+              {seeAll && <li><b>Internal notes</b> are for admins and managers only.</li>}
+            </ul>
+          </Section>
+
+          <Section id="notifications" title="7. Notifications & emails">
+            <p>
+              <b>In-app:</b> the purple number next to <b>Notifications</b> is your unread count. It updates by itself every 30 seconds.
+              Click a notification to open the task (it's then marked read), or use <b>Mark all as read</b>.
+            </p>
+            <p className="font-medium">Instant (the moment something changes):</p>
+            <Table
+              head={["When", "Who's told", "How"]}
+              rows={[
+                ["A task is assigned to someone", "The assignee", "Notification + email with brief, brand, priority and deadline"],
+                ["Edit status → First Cut Sent", "Brand client logins; the brand's TBM POC", "Email to the brand; notification to the POC"],
+                [`Revision round reaches ${REVISION_ALERT_ROUND}`, "Admins", "Notification + email"],
+                ["Final approval → Approved", "Admins", "Notification (ready to deliver)"],
+                ["Delivery → Project Closed", "Admins + assignee", "Notification 🎉"],
+                ["Person added on the Team page", "That person", "Welcome email"],
+                ["Client login created", "That client", "\"Your tracker is live\" email"],
+              ]}
+            />
+            <p className="font-medium">Every morning at 8:00 AM:</p>
+            <Table
+              head={["Check", "Who's told", "Details"]}
+              rows={[
+                ["Stale tasks", "Assignee", `One email listing tasks with no update for ${STALE_DAYS}+ day. Reminder #2 warns that admins will be told; from #${ESCALATE_AFTER} admins are copied in. Stops as soon as you update. Tasks waiting on the brand are skipped.`],
+                ["Deadlines coming up", "Assignee", `Team deadlines in the next ${DEADLINE_ALERT_DAYS} days.`],
+                ["Brand feedback nudge", "Brand client logins", `A cut has been with the brand ${BRAND_NUDGE_DAYS}+ days; repeats every ${BRAND_NUDGE_DAYS} days.`],
+                ["Move to Completed", "—", `Projects closed ${ARCHIVE_AFTER_DAYS}+ days ago move to Completed.`],
+                ["Weekly report (Mondays)", "Admins", "Active, late, waiting on brand, delivered this week, due this week, top late projects."],
+              ]}
+            />
+          </Section>
+
+          {seeAll && (
+            <Section id="managing" title="8. Managing projects">
+              <ul className="list-disc space-y-1.5 pl-5">
+                <li><b>Add task</b> (All projects or a brand page): name, brand, assignee, priority, team deadline, client deadline. The code (TBM-…) is assigned automatically and the assignee is notified.</li>
+                <li>Change assignee, brand, priority or status <b>right in the list row</b>; open the task panel for everything else.</li>
+                <li>Use <b>Group</b> (stage / brand / assignee / priority), <b>filters</b> and <b>Search</b> to slice the list. Tick <b>Show delivered &amp; closed</b> to include finished work.</li>
+                <li><b>Board</b> shows cards by stage; <b>Calendar</b> shows team or client deadlines by date.</li>
+                <li><b>Home → Team status</b> shows who's Available (0 open tasks), Busy (1–4) or Overloaded (5+), and when they're free.</li>
+                <li><b>Move to Completed</b> from the task panel (box icon) to hide a task from active lists; open it from Completed to move it back.</li>
+                {admin && <li>Admins can <b>delete</b> a task (bin icon). Prefer Completed; deleting removes its history too.</li>}
+              </ul>
+            </Section>
+          )}
+
+          {admin && (
+            <Section id="admin" title="9. Admin: team, brands & automations">
+              <p className="font-medium">Team</p>
+              <ul className="list-disc space-y-1 pl-5">
+                <li><b>Add person</b>: name, email, department, role. They get a welcome email and can sign in with that Google account at once.</li>
+                <li>Click <b>Active / Inactive</b> to lock or unlock someone instantly. Their tasks are kept.</li>
+                <li><b>Password</b> gives someone an email + password login as well (for people who can't use Google sign-in).</li>
+                <li>Removing someone unassigns their tasks; set them Inactive instead to keep the assignment.</li>
+              </ul>
+              <p className="font-medium">Brands &amp; clients</p>
+              <ul className="list-disc space-y-1 pl-5">
+                <li>Add a brand (name, POC, colour) and it appears in every Brand dropdown.</li>
+                <li><b>Add client login</b> gives the brand's contact their own tracker. Share the password with them yourself.</li>
+                <li>A brand with tasks can't be deleted; move or delete its tasks first.</li>
+              </ul>
+              <p className="font-medium">Automations</p>
+              <ul className="list-disc space-y-1 pl-5">
+                <li>Lists every automatic action. The daily checks run at 8:00 AM once the panel is live online.</li>
+                <li><b>Send test email</b> checks email is working. <b>Run now</b> runs the morning checks immediately (it sends real reminders, so don't run it twice a day).</li>
+                <li><b>Recent runs</b> shows what each run did.</li>
+              </ul>
+            </Section>
+          )}
+
+          <Section id="clients" title={`${admin ? 10 : seeAll ? 9 : 8}. What brands see`}>
+            <p>Brand contacts sign in as <b>Brand / client</b> and see only their brand's content, grouped as:</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li><b>Ready for your review</b>: First Cut Sent or In Review</li>
+              <li><b>In progress</b>: shown as Brief in progress, Pre-production, Shoot scheduled, Being edited, Being refined or Working on your feedback</li>
+              <li><b>Delivered</b>: Delivered / Completed</li>
+            </ul>
+            <p>They see the revision round and delivery date (the client deadline). They never see team names, team deadlines, internal notes or updates.</p>
+          </Section>
+
+          <Section id="faq" title={`${admin ? 11 : seeAll ? 10 : 9}. FAQ`}>
+            <div className="space-y-3">
+              <p><b>I can't change a field.</b> Team members can only change status, revision round and shoot status on their own tasks. Ask your lead for anything else.</p>
+              <p><b>A task is missing from My tasks.</b> It may not be assigned to you yet, or it's delivered / closed; tick "Show delivered &amp; closed".</p>
+              <p><b>How do I stop reminder emails?</b> Update the task's status or post an update. Reminders only go out for tasks with no update for {STALE_DAYS}+ day.</p>
+              <p><b>I can't sign in.</b> You must be added on the Team page first and be Active. Use the exact Google account your lead added.</p>
+              <p><b>Do we still use the Google Sheets?</b> No. The panel is the only source of truth now; changes in the sheets don't show here.</p>
+              <p><b>Where do files go?</b> Keep them in Google Drive and paste the link as an update on the task.</p>
+            </div>
+          </Section>
+        </div>
+      </div>
+    </div>
+  );
+}
