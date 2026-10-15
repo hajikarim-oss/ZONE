@@ -73,7 +73,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const commentsRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
-  const [pending, start] = useTransition();
+  const [, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
   const [title, setTitle] = useState(t.title);
   const [notes, setNotes] = useState(t.notes ?? "");
@@ -86,18 +86,28 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
     setContext(t.context ?? "");
   }, [t.id, t.title, t.notes, t.context]);
 
+  // Load comments + history when a task opens ("Loading…" only then). After an
+  // edit, refresh quietly a moment later so the history catches up.
+  const openedId = useRef<string | null>(null);
   useEffect(() => {
     let live = true;
-    setUpdates(null);
-    getTaskThread(t.id)
-      .then((r) => {
-        if (!live) return;
-        setUpdates(r.updates);
-        setActivity(r.activity);
-      })
-      .catch(() => live && setUpdates([]));
+    const first = openedId.current !== t.id;
+    openedId.current = t.id;
+    if (first) setUpdates(null);
+    const timer = setTimeout(
+      () =>
+        getTaskThread(t.id)
+          .then((r) => {
+            if (!live) return;
+            setUpdates((cur) => [...r.updates, ...(cur ?? []).filter((u) => u.id.startsWith("tmp-"))]);
+            setActivity(r.activity);
+          })
+          .catch(() => live && first && setUpdates([])),
+      first ? 0 : 1200,
+    );
     return () => {
       live = false;
+      clearTimeout(timer);
     };
   }, [t.id, t.updatedAt]);
 
@@ -112,12 +122,21 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   const canCollab = canManageCollaborators(viewer, t);
   const names = people.map((p) => p.name);
 
+  // Shows the change at once, then saves (and undoes it if saving fails).
   function collab(action: "add" | "remove", userId: string) {
     setErr(null);
+    const prev = t;
+    const person = people.find((p) => p.id === userId);
+    const list =
+      action === "add"
+        ? [...t.collaborators, { id: userId, name: person?.name ?? "…" }].sort((a, b) => a.name.localeCompare(b.name))
+        : t.collaborators.filter((c) => c.id !== userId);
+    onReplace({ ...t, collaborators: list, collaboratorIds: list.map((c) => c.id) });
     start(async () => {
       try {
         onReplace(action === "add" ? await addCollaborator(t.id, userId) : await removeCollaborator(t.id, userId));
       } catch (e) {
+        onReplace(prev);
         setErr(e instanceof Error ? e.message : "Couldn't update collaborators");
       }
     });
@@ -149,19 +168,24 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   }
   const set = (field: string) => (v: string) => onUpdate(t.id, { [field]: field === "revisionRound" ? Number(v) : v });
 
+  // Comment appears instantly; it's swapped for the saved one when the server replies.
   function post() {
-    if (!draft.trim()) return;
+    const body = draft.trim();
+    if (!body) return;
     setErr(null);
-    start(async () => {
-      try {
-        const u = await addUpdate(t.id, draft);
-        setUpdates((x) => [...(x ?? []), u]);
-        setDraft("");
-        setTimeout(() => threadEnd.current?.scrollIntoView({ behavior: "smooth" }), 50);
-      } catch (e) {
+    const tmpId = `tmp-${Date.now()}`;
+    const me = people.find((p) => p.id === viewerId);
+    setUpdates((x) => [...(x ?? []), { id: tmpId, authorId: viewerId, authorName: me?.name ?? "You", body, createdAt: new Date().toISOString() }]);
+    setDraft("");
+    setMentionQ(null);
+    setTimeout(() => threadEnd.current?.scrollIntoView({ behavior: "smooth" }), 30);
+    addUpdate(t.id, body)
+      .then((u) => setUpdates((x) => (x ?? []).map((y) => (y.id === tmpId ? u : y))))
+      .catch((e) => {
+        setUpdates((x) => (x ?? []).filter((y) => y.id !== tmpId));
+        setDraft(body);
         setErr(e instanceof Error ? e.message : "Couldn't post");
-      }
-    });
+      });
   }
 
   return (
@@ -189,7 +213,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
             <button
               className="btn-ghost px-2"
               title={t.archived ? "Move back to active" : "Move to Completed"}
-              onClick={() => start(async () => { await setArchived(t.id, !t.archived); onRemoved(t.id); })}
+              onClick={() => { onRemoved(t.id); setArchived(t.id, !t.archived).catch(() => alert("Couldn't move it. Refresh and try again.")); }}
             >
               {t.archived ? <ArchiveRestore className="h-4 w-4" /> : <Archive className="h-4 w-4" />}
             </button>
@@ -200,7 +224,8 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
               title="Delete"
               onClick={() => {
                 if (!confirm(`Delete ${t.code} "${t.title}"? This can't be undone. Move it to Completed instead to keep the history.`)) return;
-                start(async () => { await deleteTask(t.id); onRemoved(t.id); });
+                onRemoved(t.id);
+                deleteTask(t.id).catch(() => alert("Couldn't delete it. Refresh and try again."));
               }}
             >
               <Trash2 className="h-4 w-4" />
@@ -399,14 +424,16 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
                     <div className="flex items-center text-[12px]">
                       <span className="font-semibold">{u.authorName}</span>
                       <span className="ml-2 text-muted">{fmtDateTime(u.createdAt)}</span>
-                      {(u.authorId === viewerId || admin) && (
+                      {u.id.startsWith("tmp-") && <span className="ml-2 text-[11px] text-muted">Sending…</span>}
+                      {!u.id.startsWith("tmp-") && (u.authorId === viewerId || admin) && (
                         <button
                           className="ml-auto text-[11px] text-muted opacity-0 transition hover:text-rose-600 group-hover:opacity-100"
                           onClick={() => {
                             if (!confirm("Delete this comment?")) return;
-                            start(async () => {
-                              await deleteUpdate(u.id);
-                              setUpdates((x) => (x ?? []).filter((y) => y.id !== u.id));
+                            setUpdates((x) => (x ?? []).filter((y) => y.id !== u.id));
+                            deleteUpdate(u.id).catch((e) => {
+                              setUpdates((x) => [...(x ?? []), u].sort((a, b) => a.createdAt.localeCompare(b.createdAt)));
+                              setErr(e instanceof Error ? e.message : "Couldn't delete");
                             });
                           }}
                         >
@@ -484,7 +511,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
               placeholder="Add a comment… type @ to mention someone (Ctrl+Enter to send)"
               className="field-input flex-1 resize-none"
             />
-            <button onClick={post} disabled={pending || !draft.trim()} className="btn-primary h-9">
+            <button onClick={post} disabled={!draft.trim()} className="btn-primary h-9">
               <Send className="h-3.5 w-3.5" />
             </button>
           </div>
