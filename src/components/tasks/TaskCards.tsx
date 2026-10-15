@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import { EDIT_STATUSES, SCRIPT_STAGES } from "@/lib/constants";
@@ -87,6 +87,12 @@ export default function TaskCards({
                       </span>
                       <PriorityPill value={t.priority} />
                       {t.revisionRound > 0 && <span>R{t.revisionRound}</span>}
+                      {t.commentCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5">
+                          <MessageSquare className="h-3 w-3" />
+                          {t.commentCount}
+                        </span>
+                      )}
                     </div>
 
                     {canStatus && (

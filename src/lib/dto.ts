@@ -35,6 +35,7 @@ export type TaskDTO = {
   createdByName: string | null;
   collaborators: { id: string; name: string }[];
   collaboratorIds: string[];
+  commentCount: number;
   addedOn: string;
   updatedAt: string;
 };
@@ -47,6 +48,7 @@ export const taskInclude = {
   assignee: true,
   createdBy: { select: { id: true, name: true } },
   collaborators: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+  _count: { select: { updates: true } },
 } as const;
 
 type TaskRow = Project & {
@@ -54,6 +56,7 @@ type TaskRow = Project & {
   assignee: User | null;
   createdBy: { id: string; name: string } | null;
   collaborators: { id: string; name: string }[];
+  _count?: { updates: number };
 };
 
 export function toTaskDTO(p: TaskRow): TaskDTO {
@@ -91,6 +94,7 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     createdByName: p.createdBy?.name ?? null,
     collaborators: p.collaborators.map((c) => ({ id: c.id, name: c.name })),
     collaboratorIds: p.collaborators.map((c) => c.id),
+    commentCount: p._count?.updates ?? 0,
     addedOn: p.addedOn.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };

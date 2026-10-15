@@ -1,6 +1,6 @@
 "use client";
 
-import { Archive, ArchiveRestore, PauseCircle, Send, Trash2, UserPlus, X } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquare, PauseCircle, Send, Trash2, UserPlus, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import Avatar from "@/components/Avatar";
 import { addCollaborator, addUpdate, deleteTask, deleteUpdate, getTaskThread, removeCollaborator, setArchived, type ActivityDTO, type UpdateDTO } from "@/lib/actions";
@@ -71,6 +71,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   const [tab, setTab] = useState<"updates" | "activity">("updates");
   const [mentionQ, setMentionQ] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const commentsRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("");
   const [pending, start] = useTransition();
   const [err, setErr] = useState<string | null>(null);
@@ -170,6 +171,20 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
         <StagePill t={t} />
         <DelayBadge t={t} />
         <div className="ml-auto flex items-center gap-1">
+          <button
+            className="btn-ghost gap-1.5 px-2 text-[12px]"
+            title="Jump to comments"
+            onClick={() => {
+              setTab("updates");
+              setTimeout(() => {
+                commentsRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+                inputRef.current?.focus();
+              }, 50);
+            }}
+          >
+            <MessageSquare className="h-4 w-4" />
+            Comments{updates?.length ? ` (${updates.length})` : ""}
+          </button>
           {seeAll && (
             <button
               className="btn-ghost px-2"
@@ -356,7 +371,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
         </div>
 
         {/* updates / activity */}
-        <div className="border-t border-line bg-canvas/50 px-4 pb-6 pt-3 md:px-6">
+        <div ref={commentsRef} className="border-t border-line bg-canvas/50 px-4 pb-6 pt-3 md:px-6">
           <div className="mb-3 flex gap-4 text-[13px]">
             {(["updates", "activity"] as const).map((k) => (
               <button

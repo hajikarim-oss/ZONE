@@ -1,5 +1,6 @@
 "use client";
 
+import { MessageSquare } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { TaskDTO } from "@/lib/dto";
@@ -111,6 +112,12 @@ export default function TaskBoard({
                   <div className="mt-2.5 flex items-center justify-between gap-2">
                     <BrandChip name={t.brandName} color={t.brandColor} />
                     <div className="flex items-center gap-2">
+                      {t.commentCount > 0 && (
+                        <span className="inline-flex items-center gap-0.5 text-[11px] text-muted">
+                          <MessageSquare className="h-3 w-3" />
+                          {t.commentCount}
+                        </span>
+                      )}
                       <DueText date={t.internalDeadline} />
                       {showAssignee && t.assigneeName && <Avatar name={t.assigneeName} size={22} />}
                       {t.collaborators.length > 0 && (

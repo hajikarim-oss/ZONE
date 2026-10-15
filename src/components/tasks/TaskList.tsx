@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { BrandDTO, PersonDTO, TaskDTO } from "@/lib/dto";
@@ -98,6 +98,12 @@ export default function TaskList(p: Props) {
                       <span className="shrink-0 text-[11px] text-muted">{t.code}</span>
                       <span className={cn("truncate", done && "text-muted line-through decoration-muted/40")}>{t.title}</span>
                       <DelayBadge t={t} />
+                      {t.commentCount > 0 && (
+                        <span className="inline-flex shrink-0 items-center gap-0.5 text-[11px] text-muted" title={`${t.commentCount} comment${t.commentCount === 1 ? "" : "s"}`}>
+                          <MessageSquare className="h-3 w-3" />
+                          {t.commentCount}
+                        </span>
+                      )}
                       {t.assigneeId !== p.viewer.id && t.collaboratorIds.includes(p.viewer.id) && (
                         <span className="shrink-0 rounded bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-muted">Collaborator</span>
                       )}

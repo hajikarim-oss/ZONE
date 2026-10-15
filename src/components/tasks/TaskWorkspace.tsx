@@ -327,7 +327,7 @@ export default function TaskWorkspace(props: Props) {
           {view === "list" && (
             filtered.length === 0 ? (
               <div className="py-20 text-center text-[13px] text-muted">
-                {mode === "mine" ? "Nothing on your plate right now." : "No tasks match these filters."}
+                {mode === "mine" ? "Nothing on your plate right now. Click \"Add task\" to create one, then click the task to open it (comments are at the bottom)." : "No tasks match these filters."}
               </div>
             ) : (
               <>
