@@ -30,6 +30,11 @@ export type TaskDTO = {
   extDeadlineChanges: number;
   intDeadlineChanges: number;
   archived: boolean;
+  onHold: boolean;
+  createdById: string | null;
+  createdByName: string | null;
+  collaborators: { id: string; name: string }[];
+  collaboratorIds: string[];
   addedOn: string;
   updatedAt: string;
 };
@@ -40,9 +45,18 @@ export type BrandDTO = { id: string; name: string; color: string };
 export const taskInclude = {
   brand: true,
   assignee: true,
+  createdBy: { select: { id: true, name: true } },
+  collaborators: { select: { id: true, name: true }, orderBy: { name: "asc" } },
 } as const;
 
-export function toTaskDTO(p: Project & { brand: Brand | null; assignee: User | null }): TaskDTO {
+type TaskRow = Project & {
+  brand: Brand | null;
+  assignee: User | null;
+  createdBy: { id: string; name: string } | null;
+  collaborators: { id: string; name: string }[];
+};
+
+export function toTaskDTO(p: TaskRow): TaskDTO {
   return {
     id: p.id,
     code: p.code,
@@ -72,6 +86,11 @@ export function toTaskDTO(p: Project & { brand: Brand | null; assignee: User | n
     extDeadlineChanges: p.extDeadlineChanges,
     intDeadlineChanges: p.intDeadlineChanges,
     archived: p.archived,
+    onHold: p.onHold,
+    createdById: p.createdById,
+    createdByName: p.createdBy?.name ?? null,
+    collaborators: p.collaborators.map((c) => ({ id: c.id, name: c.name })),
+    collaboratorIds: p.collaborators.map((c) => c.id),
     addedOn: p.addedOn.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };

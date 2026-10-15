@@ -5,13 +5,13 @@ import crypto from "crypto";
 import { revalidatePath } from "next/cache";
 import { prisma } from "@/lib/prisma";
 import { requireTeamUser } from "@/lib/auth";
-import { canCreateProjects, canEditField, canManageBrands, canManageTeam, canSeeAll, canViewProject, isAdmin } from "@/lib/rbac";
+import { canCreateProjects, canEditField, canManageBrands, canManageCollaborators, canManageTeam, canSeeAll, canViewProject, isAdmin, type Access } from "@/lib/rbac";
 import {
   BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPARTMENTS, DEPTS, EDIT_STATUSES, FINAL_APPROVAL,
   PREPRO_STAGES, PRIORITIES, REVISION_ALERT_ROUND, ROLES, SCRIPT_STAGES, SHOOT_STATUSES,
 } from "@/lib/constants";
 import { forViewer, taskInclude, toTaskDTO, type TaskDTO } from "@/lib/dto";
-import { onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert } from "@/lib/notify";
+import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert } from "@/lib/notify";
 import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
 import { runDailyAutomations, type DailyResult } from "@/lib/automations";
 
@@ -30,6 +30,17 @@ const ENUMS: Record<string, readonly string[]> = {
 const TEXT = new Set(["title", "type", "platform", "notes", "context"]);
 const DATES = new Set(["externalDeadline", "internalDeadline"]);
 const REFS = new Set(["brandId", "assigneeId"]);
+const BOOLS = new Set(["onHold"]);
+
+// Who can see / edit a task, from a loaded row.
+function access(p: { assigneeId: string | null; createdById: string | null; collaborators: { id: string }[] }): Access {
+  return { assigneeId: p.assigneeId, createdById: p.createdById, collaboratorIds: p.collaborators.map((c) => c.id) };
+}
+
+// Link to a task for a given person (team members open it from My tasks).
+function taskHref(role: string, id: string) {
+  return role === "ADMIN" || role === "MANAGER" ? `/projects?task=${id}` : `/my-tasks?task=${id}`;
+}
 
 const FIELD_LABEL: Record<string, string> = {
   title: "Title", type: "Type", platform: "Platform", dept: "Dept", priority: "Priority",
@@ -37,6 +48,7 @@ const FIELD_LABEL: Record<string, string> = {
   editStatus: "Edit status", revisionRound: "Revision round", clientReview: "Client review",
   finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Context",
   externalDeadline: "External deadline", internalDeadline: "Internal deadline", brandId: "Brand", assigneeId: "Assignee",
+  onHold: "On hold",
 };
 
 function coerce(field: string, raw: unknown): unknown {
@@ -62,12 +74,14 @@ function coerce(field: string, raw: unknown): unknown {
     return d;
   }
   if (REFS.has(field)) return raw ? String(raw) : null;
+  if (BOOLS.has(field)) return raw === true || raw === "true";
   throw new Error(`Unknown field ${field}`);
 }
 
 function show(v: unknown, field: string) {
   if (v == null || v === "") return "—";
   if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (typeof v === "boolean") return v ? "Yes" : "No";
   return String(v).slice(0, 200) + (field === "notes" && String(v).length > 200 ? "…" : "");
 }
 
@@ -76,11 +90,11 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   const me = await requireTeamUser();
   const before = await prisma.project.findUnique({ where: { id }, include: taskInclude });
   if (!before) throw new Error("Task not found");
-  if (!canViewProject(me, before.assigneeId)) throw new Error("Not allowed");
+  if (!canViewProject(me, access(before))) throw new Error("Not allowed");
 
   const data: Record<string, unknown> = {};
   for (const [field, raw] of Object.entries(patch)) {
-    if (!canEditField(me, field, before.assigneeId)) throw new Error(`You can't change ${FIELD_LABEL[field] ?? field}`);
+    if (!canEditField(me, field, access(before))) throw new Error(`You can't change ${FIELD_LABEL[field] ?? field}`);
     data[field] = coerce(field, raw);
   }
 
@@ -161,30 +175,77 @@ export async function createTask(input: {
   priority?: string;
   type?: string | null;
   platform?: string | null;
+  collaboratorIds?: string[];
 }): Promise<TaskDTO> {
   const me = await requireTeamUser();
-  if (!canCreateProjects(me)) throw new Error("Only admins and managers can add tasks");
+  if (!canCreateProjects(me)) throw new Error("You can't add tasks");
   const title = input.title?.trim();
   if (!title) throw new Error("Give the task a name");
+  const seeAll = canSeeAll(me);
+  const collabIds = [...new Set((input.collaboratorIds ?? []).filter(Boolean))];
   const p = await prisma.project.create({
     data: {
       code: await nextCode(),
       title,
       brandId: input.brandId || null,
-      assigneeId: input.assigneeId || null,
+      // Team members add tasks for themselves (like Asana's My tasks)
+      assigneeId: seeAll ? input.assigneeId || null : me.id,
+      createdById: me.id,
+      collaborators: collabIds.length ? { connect: collabIds.map((id) => ({ id })) } : undefined,
       priority: input.priority && PRIORITIES.includes(input.priority as any) ? input.priority : "Medium",
       type: input.type || null,
       platform: input.platform || null,
       internalDeadline: input.internalDeadline ? new Date(input.internalDeadline) : null,
-      externalDeadline: input.externalDeadline ? new Date(input.externalDeadline) : null,
+      externalDeadline: seeAll && input.externalDeadline ? new Date(input.externalDeadline) : null,
       lastTeamUpdateAt: new Date(),
     },
     include: taskInclude,
   });
   await prisma.activity.create({ data: { projectId: p.id, actorName: me.name, field: "Created", toValue: p.title } });
   if (p.assigneeId && p.assigneeId !== me.id) await onAssigned(p);
+  for (const c of p.collaborators) {
+    if (c.id === me.id || c.id === p.assigneeId) continue;
+    const u = await prisma.user.findUnique({ where: { id: c.id } });
+    if (u) await notify(u.id, `${me.name} added you to ${p.title}`, "You're a collaborator on this task", taskHref(u.role, p.id));
+  }
   revalidatePath("/", "layout");
-  return toTaskDTO(p);
+  return forViewer(toTaskDTO(p), seeAll);
+}
+
+// Collaborators: they can see the task, comment on it and get its updates.
+export async function addCollaborator(projectId: string, userId: string): Promise<TaskDTO> {
+  const me = await requireTeamUser();
+  const p = await prisma.project.findUnique({ where: { id: projectId }, include: taskInclude });
+  if (!p) throw new Error("Task not found");
+  if (!canManageCollaborators(me, access(p))) throw new Error("Only the assignee, the person who added it, or a manager can add collaborators");
+  const u = await prisma.user.findUnique({ where: { id: userId } });
+  if (!u || !u.active) throw new Error("That person isn't active");
+  const after = await prisma.project.update({
+    where: { id: projectId },
+    data: { collaborators: { connect: { id: userId } } },
+    include: taskInclude,
+  });
+  await prisma.activity.create({ data: { projectId, actorName: me.name, field: "Collaborator", toValue: `Added ${u.name}` } });
+  if (u.id !== me.id) await notify(u.id, `${me.name} added you to ${p.title}`, "You're a collaborator on this task", taskHref(u.role, p.id));
+  revalidatePath("/", "layout");
+  return forViewer(toTaskDTO(after), canSeeAll(me));
+}
+
+export async function removeCollaborator(projectId: string, userId: string): Promise<TaskDTO> {
+  const me = await requireTeamUser();
+  const p = await prisma.project.findUnique({ where: { id: projectId }, include: taskInclude });
+  if (!p) throw new Error("Task not found");
+  // You can always remove yourself; otherwise the same people who can add.
+  if (userId !== me.id && !canManageCollaborators(me, access(p))) throw new Error("Not allowed");
+  const after = await prisma.project.update({
+    where: { id: projectId },
+    data: { collaborators: { disconnect: { id: userId } } },
+    include: taskInclude,
+  });
+  const u = await prisma.user.findUnique({ where: { id: userId } });
+  await prisma.activity.create({ data: { projectId, actorName: me.name, field: "Collaborator", toValue: `Removed ${u?.name ?? "someone"}` } });
+  revalidatePath("/", "layout");
+  return forViewer(toTaskDTO(after), canSeeAll(me));
 }
 
 export async function setArchived(id: string, archived: boolean) {
@@ -202,19 +263,19 @@ export async function deleteTask(id: string) {
   revalidatePath("/", "layout");
 }
 
-export type UpdateDTO = { id: string; authorName: string; body: string; createdAt: string };
+export type UpdateDTO = { id: string; authorId: string | null; authorName: string; body: string; createdAt: string };
 export type ActivityDTO = { id: string; actorName: string; field: string; fromValue: string | null; toValue: string | null; createdAt: string };
 
 export async function getTaskThread(id: string): Promise<{ updates: UpdateDTO[]; activity: ActivityDTO[] }> {
   const me = await requireTeamUser();
-  const p = await prisma.project.findUnique({ where: { id }, select: { assigneeId: true } });
-  if (!p || !canViewProject(me, p.assigneeId)) throw new Error("Not allowed");
+  const p = await prisma.project.findUnique({ where: { id }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } });
+  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
   const [updates, activity] = await Promise.all([
     prisma.update.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" } }),
     prisma.activity.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" }, take: 50 }),
   ]);
   return {
-    updates: updates.map((u) => ({ id: u.id, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() })),
+    updates: updates.map((u) => ({ id: u.id, authorId: u.authorId, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() })),
     // Team members don't see client-deadline changes in the history either
     activity: activity
       .filter((a) => canSeeAll(me) || a.field !== "External deadline")
@@ -222,18 +283,67 @@ export async function getTaskThread(id: string): Promise<{ updates: UpdateDTO[];
   };
 }
 
+// Comments (Asana-style). Everyone on the task is notified; @Name mentions
+// notify (and email) that person and add them as a collaborator so they can
+// open the task. Commenting also makes you a collaborator.
 export async function addUpdate(projectId: string, body: string): Promise<UpdateDTO> {
   const me = await requireTeamUser();
-  const p = await prisma.project.findUnique({ where: { id: projectId }, select: { assigneeId: true } });
-  if (!p || !canViewProject(me, p.assigneeId)) throw new Error("Not allowed");
+  const p = await prisma.project.findUnique({ where: { id: projectId }, include: taskInclude });
+  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
   const text = body.trim();
   if (!text) throw new Error("Write something first");
   const u = await prisma.update.create({ data: { projectId, authorId: me.id, authorName: me.name, body: text } });
-  if (p.assigneeId === me.id) {
-    await prisma.project.update({ where: { id: projectId }, data: { lastTeamUpdateAt: new Date(), reminderCount: 0 } });
+
+  const people = await prisma.user.findMany({ where: { active: true } });
+  const lower = text.toLowerCase();
+  const mentioned = people.filter((x) => x.id !== me.id && lower.includes("@" + x.name.toLowerCase()));
+
+  const existing = new Set(p.collaborators.map((c) => c.id));
+  const toConnect = [
+    ...mentioned.filter((x) => !existing.has(x.id) && x.id !== p.assigneeId),
+    ...(me.id !== p.assigneeId && me.id !== p.createdById && !existing.has(me.id) ? [me] : []),
+  ];
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      ...(toConnect.length ? { collaborators: { connect: [...new Set(toConnect.map((x) => x.id))].map((id) => ({ id })) } } : {}),
+      ...(p.assigneeId === me.id ? { lastTeamUpdateAt: new Date(), reminderCount: 0 } : {}),
+    },
+  });
+
+  // Notify everyone on the task (except me); mentions get a stronger note + email.
+  const snippet = text.length > 120 ? text.slice(0, 117) + "…" : text;
+  const followers = new Set<string>([p.assigneeId ?? "", p.createdById ?? "", ...existing].filter(Boolean));
+  const mentionedIds = new Set(mentioned.map((x) => x.id));
+  for (const id of followers) {
+    if (id === me.id || mentionedIds.has(id)) continue;
+    const f = people.find((x) => x.id === id);
+    if (f) await notify(f.id, `${me.name} commented on ${p.title}`, snippet, taskHref(f.role, p.id));
   }
+  for (const m of mentioned) {
+    await notify(m.id, `${me.name} mentioned you on ${p.title}`, snippet, taskHref(m.role, p.id));
+    await sendMail(
+      m.email,
+      `💬 ${me.name} mentioned you on ${p.title}`,
+      emailHtml({
+        heading: `${me.name} mentioned you`,
+        intro: `On "${p.title}"${p.brand ? ` (${p.brand.name})` : ""}:\n\n${text}`,
+        cta: { label: "Open task", href: `${APP_URL}${taskHref(m.role, p.id)}` },
+      }),
+    );
+  }
+
   revalidatePath("/", "layout");
-  return { id: u.id, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() };
+  return { id: u.id, authorId: u.authorId, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() };
+}
+
+export async function deleteUpdate(id: string) {
+  const me = await requireTeamUser();
+  const u = await prisma.update.findUnique({ where: { id } });
+  if (!u) return;
+  if (u.authorId !== me.id && !isAdmin(me)) throw new Error("You can only delete your own comments");
+  await prisma.update.delete({ where: { id } });
+  revalidatePath("/", "layout");
 }
 
 export async function markAllNotificationsRead() {

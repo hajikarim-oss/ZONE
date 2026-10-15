@@ -6,16 +6,16 @@ import { useCallback, useEffect, useMemo, useState, useTransition } from "react"
 import { createTask, updateTask } from "@/lib/actions";
 import { PRIORITIES } from "@/lib/constants";
 import type { BrandDTO, PersonDTO, TaskDTO } from "@/lib/dto";
-import { computeStage, isDone, STAGE_GROUPS } from "@/lib/status";
+import { BOARD_COLUMNS, boardColumn, computeStage, isDone, STAGE_GROUPS, type BoardKey } from "@/lib/status";
 import { cn } from "@/lib/utils";
-import TaskBoard from "./TaskBoard";
+import TaskBoard, { dropPatch } from "./TaskBoard";
 import TaskCalendar from "./TaskCalendar";
 import TaskList, { type Group } from "./TaskList";
 import TaskCards from "./TaskCards";
 import TaskPanel from "./TaskPanel";
 
 type View = "list" | "board" | "calendar";
-type GroupBy = "stage" | "brand" | "assignee" | "priority" | "none";
+type GroupBy = "board" | "stage" | "brand" | "assignee" | "priority" | "none";
 
 type Props = {
   title: string;
@@ -24,7 +24,7 @@ type Props = {
   tasks: TaskDTO[];
   people: PersonDTO[];
   brands: BrandDTO[];
-  viewer: { id: string; seeAll: boolean; admin: boolean; department: string };
+  viewer: { id: string; role: string; seeAll: boolean; admin: boolean; department: string };
   mode: "all" | "mine" | "brand" | "archive";
   fixedBrandId?: string;
   defaultGroupBy?: GroupBy;
@@ -118,19 +118,25 @@ export default function TaskWorkspace(props: Props) {
     [tasks, people, brands],
   );
 
-  const filtered = useMemo(() => {
+  // Everything matching the filters (the board always shows Completed)…
+  const matching = useMemo(() => {
     const needle = q.trim().toLowerCase();
     return tasks
-      .filter((t) => (showDone ? true : !isDone(t)))
       .filter((t) => !brandF || t.brandId === brandF)
       .filter((t) => !personF || (personF === "none" ? !t.assigneeId : t.assigneeId === personF))
       .filter((t) => !prioF || t.priority === prioF)
       .filter((t) => !needle || `${t.code} ${t.title} ${t.brandName ?? ""} ${t.assigneeName ?? ""}`.toLowerCase().includes(needle))
       .sort(byDue);
-  }, [tasks, q, brandF, personF, prioF, showDone]);
+  }, [tasks, q, brandF, personF, prioF]);
+  // …and the list / calendar hide finished work unless asked.
+  const filtered = useMemo(() => (showDone ? matching : matching.filter((t) => !isDone(t))), [matching, showDone]);
 
   const groups: Group[] = useMemo(() => {
     if (groupBy === "none") return [{ key: "all", label: "", tasks: filtered }];
+    if (groupBy === "board")
+      return BOARD_COLUMNS.map((c) => ({ key: c.key, label: c.label, color: c.dot, tasks: filtered.filter((t) => boardColumn(t) === c.key) })).filter(
+        (g) => g.tasks.length,
+      );
     if (groupBy === "stage")
       return STAGE_GROUPS.map((g) => ({ key: g.key, label: g.label, color: g.dot, tasks: filtered.filter((t) => computeStage(t).key === g.key) })).filter(
         (g) => g.tasks.length,
@@ -163,6 +169,7 @@ export default function TaskWorkspace(props: Props) {
   const [newDue, setNewDue] = useState("");
   const [newExtDue, setNewExtDue] = useState("");
   const [newPrio, setNewPrio] = useState("Medium");
+  const [newCollabs, setNewCollabs] = useState<string[]>([]);
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();
@@ -176,9 +183,11 @@ export default function TaskWorkspace(props: Props) {
           internalDeadline: newDue || null,
           externalDeadline: newExtDue || null,
           priority: newPrio,
+          collaboratorIds: newCollabs,
         });
         setTasks((ts) => [t, ...ts]);
         setNewTitle("");
+        setNewCollabs([]);
         flash(`${t.code} added`);
       } catch (err) {
         flash(err instanceof Error ? err.message : "Couldn't add task");
@@ -186,7 +195,8 @@ export default function TaskWorkspace(props: Props) {
     });
   }
 
-  const canCreate = viewer.seeAll && mode !== "archive";
+  // Everyone can add tasks (team members' tasks are assigned to themselves)
+  const canCreate = mode !== "archive";
   const statusField = !viewer.seeAll && viewer.department === "Creative" ? "scriptStage" : "editStatus";
 
   return (
@@ -248,6 +258,7 @@ export default function TaskWorkspace(props: Props) {
           </select>
           {view === "list" && (
             <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="field-input w-auto shrink-0 py-1">
+              <option value="board">Group: Status</option>
               <option value="stage">Group: Stage</option>
               {!props.fixedBrandId && <option value="brand">Group: Brand</option>}
               {viewer.seeAll && <option value="assignee">Group: Assignee</option>}
@@ -255,13 +266,13 @@ export default function TaskWorkspace(props: Props) {
               <option value="none">No grouping</option>
             </select>
           )}
-          {mode !== "archive" && (
+          {mode !== "archive" && view !== "board" && (
             <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13px] text-muted">
               <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} className="accent-[#5b3fd1]" />
               Show delivered & closed
             </label>
           )}
-          <span className={cn("shrink-0 whitespace-nowrap text-[12px] text-muted", mode === "archive" && "ml-auto")}>{filtered.length} tasks</span>
+          <span className={cn("shrink-0 whitespace-nowrap text-[12px] text-muted", (mode === "archive" || view === "board") && "ml-auto")}>{(view === "board" ? matching : filtered).length} tasks</span>
         </div>
 
         {adding && canCreate && (
@@ -273,19 +284,40 @@ export default function TaskWorkspace(props: Props) {
                 {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
               </select>
             )}
-            <select value={newPerson} onChange={(e) => setNewPerson(e.target.value)} className="field-input w-auto">
-              <option value="">Assignee</option>
-              {people.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
+            {viewer.seeAll && (
+              <select value={newPerson} onChange={(e) => setNewPerson(e.target.value)} className="field-input w-auto">
+                <option value="">Assignee</option>
+                {people.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+              </select>
+            )}
             <select value={newPrio} onChange={(e) => setNewPrio(e.target.value)} className="field-input w-auto">
               {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
             </select>
             <label className="flex items-center gap-1 text-[12px] text-muted">
-              Team <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto" />
+              {viewer.seeAll ? "Team" : "Due"} <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto" />
             </label>
-            <label className="flex items-center gap-1 text-[12px] text-muted">
-              Client <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto" />
-            </label>
+            {viewer.seeAll && (
+              <label className="flex items-center gap-1 text-[12px] text-muted">
+                Client <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto" />
+              </label>
+            )}
+            <select
+              value=""
+              onChange={(e) => e.target.value && setNewCollabs((c) => [...new Set([...c, e.target.value])])}
+              className="field-input w-auto"
+            >
+              <option value="">+ Collaborator</option>
+              {people.filter((p) => p.active && p.id !== viewer.id && !newCollabs.includes(p.id)).map((p) => (
+                <option key={p.id} value={p.id}>{p.name}</option>
+              ))}
+            </select>
+            {newCollabs.map((id) => (
+              <span key={id} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[12px]">
+                {people.find((p) => p.id === id)?.name}
+                <button type="button" className="text-muted hover:text-ink" onClick={() => setNewCollabs((c) => c.filter((x) => x !== id))}>×</button>
+              </span>
+            ))}
+            {!viewer.seeAll && <span className="basis-full text-[11px] text-muted">The task is assigned to you. Collaborators can see it and comment.</span>}
             <button type="submit" className="btn-primary">Add</button>
             <button type="button" className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
           </form>
@@ -302,8 +334,7 @@ export default function TaskWorkspace(props: Props) {
               <div className="md:hidden">
                 <TaskCards
                   groups={groups}
-                  seeAll={viewer.seeAll}
-                  viewerId={viewer.id}
+                  viewer={viewer}
                   statusField={statusField}
                   showAssignee={mode !== "mine"}
                   showBrand={!props.fixedBrandId}
@@ -317,8 +348,7 @@ export default function TaskWorkspace(props: Props) {
                 groups={groups}
                 people={people}
                 brands={brands}
-                seeAll={viewer.seeAll}
-                viewerId={viewer.id}
+                viewer={viewer}
                 statusField={statusField}
                 showAssignee={mode !== "mine"}
                 showBrand={!props.fixedBrandId}
@@ -330,7 +360,20 @@ export default function TaskWorkspace(props: Props) {
               </>
             )
           )}
-          {view === "board" && <div className="h-full pt-3"><TaskBoard tasks={filtered} showDone={showDone} selectedId={selectedId} onOpen={(id) => open(id)} /></div>}
+          {view === "board" && (
+            <div className="h-full pt-3">
+              <TaskBoard
+                tasks={matching}
+                selectedId={selectedId}
+                showAssignee={mode !== "mine"}
+                onOpen={(id) => open(id)}
+                onMove={(t, to: BoardKey) => {
+                  const patch = dropPatch(t, to);
+                  if (patch) onUpdate(t.id, patch);
+                }}
+              />
+            </div>
+          )}
           {view === "calendar" && <div className="pt-3"><TaskCalendar tasks={filtered} seeAll={viewer.seeAll} onOpen={(id) => open(id)} /></div>}
         </div>
       </div>
@@ -341,10 +384,9 @@ export default function TaskWorkspace(props: Props) {
           task={selected}
           people={people}
           brands={brands}
-          seeAll={viewer.seeAll}
-          admin={viewer.admin}
-          viewerId={viewer.id}
+          viewer={viewer}
           onClose={() => open(null)}
+          onReplace={(fresh) => setTasks((ts) => ts.map((t) => (t.id === fresh.id ? fresh : t)))}
           onUpdate={onUpdate}
           onRemoved={(id) => {
             setTasks((ts) => ts.filter((t) => t.id !== id));

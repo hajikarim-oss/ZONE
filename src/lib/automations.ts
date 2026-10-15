@@ -30,7 +30,8 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
   const result: DailyResult = { reminders: 0, escalated: 0, deadlineAlerts: 0, brandNudges: 0, archived: 0, weekly: false };
 
   const projects = await prisma.project.findMany({ where: { archived: false }, include: taskInclude });
-  const active = projects.filter((p) => !isDone(p));
+  // On-hold tasks are paused: no reminders, deadline alerts or brand nudges.
+  const active = projects.filter((p) => !isDone(p) && !p.onHold);
 
   // ── 1. Stale reminders ──
   const staleCutoff = new Date(now.getTime() - STALE_DAYS * 86_400_000);

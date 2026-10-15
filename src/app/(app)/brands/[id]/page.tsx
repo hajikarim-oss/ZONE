@@ -20,7 +20,7 @@ export default async function BrandPage({ params }: { params: Promise<{ id: stri
         accentColor={brand.color}
         mode="brand"
         fixedBrandId={brand.id}
-        defaultGroupBy="stage"
+        defaultGroupBy="board"
         {...data}
       />
     </Suspense>

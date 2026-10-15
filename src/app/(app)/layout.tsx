@@ -2,7 +2,7 @@ import Sidebar from "@/components/Sidebar";
 import Tour from "@/components/Tour";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canSeeAll, isAdmin } from "@/lib/rbac";
+import { canSeeAll, isAdmin, visibleToMember } from "@/lib/rbac";
 
 export default async function AppLayout({ children }: { children: React.ReactNode }) {
   const me = await requireTeamPage();
@@ -13,7 +13,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     seeAll
       ? prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true } })
       : prisma.brand.findMany({
-          where: { projects: { some: { assigneeId: me.id, archived: false } } },
+          where: { projects: { some: { archived: false, ...visibleToMember(me.id) } } },
           orderBy: { name: "asc" },
           select: { id: true, name: true, color: true },
         }),

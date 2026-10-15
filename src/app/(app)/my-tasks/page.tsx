@@ -2,18 +2,20 @@ import { Suspense } from "react";
 import TaskWorkspace from "@/components/tasks/TaskWorkspace";
 import { requireTeamPage } from "@/lib/auth";
 import { loadWorkspace } from "@/lib/workspace";
+import { visibleToMember } from "@/lib/rbac";
 
 // Replaces each person's tab in the old TEAM sheet.
 export default async function MyTasksPage() {
   const me = await requireTeamPage();
-  const data = await loadWorkspace(me, { assigneeId: me.id, archived: false });
+  // Like Asana: tasks assigned to me, tasks I added, and tasks I collaborate on
+  const data = await loadWorkspace(me, { archived: false, ...visibleToMember(me.id) });
   return (
     <Suspense>
       <TaskWorkspace
         title="My tasks"
-        subtitle={`Everything assigned to you, ${me.name.split(" ")[0]}. Update the status and post your notes or links; it all syncs to the team.`}
+        subtitle={`Tasks assigned to you, tasks you added, and tasks you collaborate on, ${me.name.split(" ")[0]}. Add your own with "Add task".`}
         mode="mine"
-        defaultGroupBy="stage"
+        defaultGroupBy="board"
         {...data}
       />
     </Suspense>

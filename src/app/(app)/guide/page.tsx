@@ -48,7 +48,7 @@ export default async function GuidePage() {
     ["day", "Your daily routine"],
     ["flow", "The workflow & statuses"],
     ["stages", "Stages, late tags & deadlines"],
-    ["updates", "Updates, links & history"],
+    ["updates", "Comments, collaborators & history"],
     ["notifications", "Notifications & emails"],
     ...(seeAll ? ([["managing", "Managing projects"]] as [string, string][]) : []),
     ...(admin ? ([["admin", "Admin: team, brands & automations"]] as [string, string][]) : []),
@@ -93,7 +93,7 @@ export default async function GuidePage() {
             <Table
               head={["Role", "Sees", "Can change"]}
               rows={[
-                ["Team member", "Only their own tasks, their own deadline (the team deadline), the context from their lead, updates and history.", "Status, revision round and shoot status on their own tasks; post updates and links."],
+                ["Team member", "Tasks assigned to them, tasks they added, and tasks they collaborate on; the team deadline, context from their lead, comments and history.", "Add their own tasks; status, revision round, shoot status and On hold on tasks assigned to them; name, brand, deadline and priority on tasks they added; collaborators; comments."],
                 ["Manager", "Every project and brand, both deadlines, internal notes, team status and delay tracker, Completed.", "Everything on every task; add tasks; move tasks to Completed."],
                 ["Admin", "Everything managers see, plus Team, Brands & clients and Automations.", "Everything, plus people, roles, Active/Inactive, brands, client logins and deleting tasks."],
                 ["Brand client", "Only their brand's content, in friendly wording, with the revision round and delivery date.", "Nothing; view only."],
@@ -107,7 +107,8 @@ export default async function GuidePage() {
               <li>Open <b>Home</b>: check what's due in the next 7 days and anything tagged late.</li>
               <li>Check <b>Notifications</b> (the purple number in the sidebar) for new assignments.</li>
               <li>Open <b>My tasks</b>. For every task you touched today, move the <b>Edit status</b> forward (right in the row, or in the task panel).</li>
-              <li>Post a short <b>update</b> or Drive link in the task panel when you share a cut, render, or hit a blocker.</li>
+              <li>Post a short <b>comment</b> or Drive link in the task panel when you share a cut, render, or hit a blocker. @mention whoever needs to know.</li>
+              <li>Doing something that isn't on the panel yet? <b>Add task</b> in My tasks so it's tracked.</li>
               {seeAll && <li>Managers: scan <b>All projects</b> grouped by brand, and the <b>Delay tracker</b> on Home, every morning.</li>}
             </ol>
             <p>
@@ -159,10 +160,13 @@ export default async function GuidePage() {
             )}
           </Section>
 
-          <Section id="updates" title="6. Updates, links & history">
+          <Section id="updates" title="6. Comments, collaborators & history">
             <ul className="list-disc space-y-1 pl-5">
-              <li>Every task panel has <b>Updates &amp; links</b> at the bottom. Write a note or paste a Drive link and press <b>Ctrl + Enter</b>. Links become clickable.</li>
-              <li>Posting an update counts as updating the task (it resets your reminders).</li>
+              <li>Every task panel has <b>Comments</b> at the bottom. Write a note or paste a Drive link and press <b>Ctrl + Enter</b>. Links become clickable. You can delete your own comments.</li>
+              <li>Type <b>@</b> and start a name to <b>mention</b> someone. They get a notification and an email, and are added as a collaborator.</li>
+              <li><b>Collaborators</b> can see the task and are notified when someone comments. The assignee, whoever added the task, and admins / managers can add or remove them from the task panel.</li>
+              <li>A comment from the assignee counts as updating the task (it resets their reminders).</li>
+              <li><b>On hold</b> (toggle in the task panel, or drag to the On hold column) pauses a task: no late tags and no reminders until it's taken off hold.</li>
               <li><b>Activity</b> shows every change: who changed which field, from what, to what, and when.</li>
               <li><b>Context for the team</b> is the brief from your lead{seeAll ? " (you write it; team members can read it)" : " (read-only for you)"}.</li>
               {seeAll && <li><b>Internal notes</b> are for admins and managers only.</li>}
@@ -206,7 +210,8 @@ export default async function GuidePage() {
                 <li><b>Add task</b> (All projects or a brand page): name, brand, assignee, priority, team deadline, client deadline. The code (TBM-…) is assigned automatically and the assignee is notified.</li>
                 <li>Change assignee, brand, priority or status <b>right in the list row</b>; open the task panel for everything else.</li>
                 <li>Use <b>Group</b> (stage / brand / assignee / priority), <b>filters</b> and <b>Search</b> to slice the list. Tick <b>Show delivered &amp; closed</b> to include finished work.</li>
-                <li><b>Board</b> shows cards by stage; <b>Calendar</b> shows team or client deadlines by date.</li>
+                <li><b>Board</b> has five columns (Upcoming, Ongoing, Revision, On hold, Completed); drag cards between them. <b>Calendar</b> shows team or client deadlines by date.</li>
+                <li>Team members can add their own tasks too; they're assigned to the person who added them and show up in All projects, marked with who added them.</li>
                 <li><b>Home → Team status</b> shows who's Available (0 open tasks), Busy (1–4) or Overloaded (5+), and when they're free.</li>
                 <li><b>Move to Completed</b> from the task panel (box icon) to hide a task from active lists; open it from Completed to move it back.</li>
                 {admin && <li>Admins can <b>delete</b> a task (bin icon). Prefer Completed; deleting removes its history too.</li>}
@@ -250,8 +255,18 @@ export default async function GuidePage() {
 
           <Section id="faq" title={`${admin ? 11 : seeAll ? 10 : 9}. FAQ`}>
             <div className="space-y-3">
-              <p><b>I can't change a field.</b> Team members can only change status, revision round and shoot status on their own tasks. Ask your lead for anything else.</p>
-              <p><b>A task is missing from My tasks.</b> It may not be assigned to you yet, or it's delivered / closed; tick "Show delivered &amp; closed".</p>
+              <p><b>I can't change a field.</b> On tasks assigned to you, you can change status, revision round, shoot status and On hold. On tasks you added you can also change the name, brand, deadline and priority. Ask your lead for anything else.</p>
+              <p><b>A task is missing from My tasks.</b> It may not be assigned to you yet, or it's delivered / closed; tick "Show delivered &amp; closed" (on the Board, it's in the Completed column).</p>
+              <p><b>Can I add my own task?</b> Yes. Use <b>Add task</b> in My tasks. It's assigned to you, and admins and managers can see it.</p>
+              <p><b>Who can see a task I added?</b> You, any collaborators you add, and admins / managers. Other team members can't.</p>
+              <p><b>How do I share a task with a teammate?</b> Add them under <b>Collaborators</b> in the task panel, or @mention them in a comment.</p>
+              <p><b>What do the Board columns mean?</b> Upcoming = brief, script, pre-pro or shoot; Ongoing = editing, with the brand for review, or approved; Revision = internal or external revisions; On hold = paused; Completed = delivered or closed.</p>
+              <p><b>What happens when I drag a card?</b> The status changes to match the column: Ongoing sets Edit status to In Progress, Revision starts the next revision round, Completed marks it Final Approved and Files Sent. You can fine-tune it in the task panel.</p>
+              <p><b>Does On hold stop reminders?</b> Yes. On-hold tasks get no late tags, no stale reminders and no deadline alerts.</p>
+              <p><b>Who sees my comments?</b> Everyone on the team who can see the task. Brand clients never see comments.</p>
+              <p><b>I mentioned someone but they didn't get it.</b> Pick their name from the list that appears after typing @ so the full name is used.</p>
+              <p><b>Can I use this on my phone?</b> Yes. Open the panel link in your phone browser and use "Add to Home Screen" to install it like an app.</p>
+              <p><b>Can I see the client deadline?</b> Team members see only the team deadline; the client deadline is for admins and managers.</p>
               <p><b>How do I stop reminder emails?</b> Update the task's status or post an update. Reminders only go out for tasks with no update for {STALE_DAYS}+ day.</p>
               <p><b>I can't sign in.</b> You must be added on the Team page first and be Active. Use the exact Google account your lead added.</p>
               <p><b>Do we still use the Google Sheets?</b> No. The panel is the only source of truth now; changes in the sheets don't show here.</p>

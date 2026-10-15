@@ -7,6 +7,7 @@ import type { BrandDTO, PersonDTO, TaskDTO } from "@/lib/dto";
 import { EDIT_STATUSES, PRIORITIES, REVISION_ROUNDS, SCRIPT_STAGES } from "@/lib/constants";
 import { isDone } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { canEditField } from "@/lib/rbac";
 import { BrandChip, CellSelect, DelayBadge, DueText, opts, PriorityPill, StagePill } from "./bits";
 
 export type Group = { key: string; label: string; color?: string; tasks: TaskDTO[] };
@@ -15,8 +16,7 @@ type Props = {
   groups: Group[];
   people: PersonDTO[];
   brands: BrandDTO[];
-  seeAll: boolean;
-  viewerId: string;
+  viewer: { id: string; role: string; seeAll: boolean };
   statusField: "editStatus" | "scriptStage";
   showAssignee: boolean;
   showBrand: boolean;
@@ -28,21 +28,21 @@ type Props = {
 // Asana-style list: one quiet row per task, inline dropdowns, collapsible
 // sections. Grid template keeps columns aligned across sections.
 export default function TaskList(p: Props) {
+  const seeAll = p.viewer.seeAll;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
   const cols = [
     "minmax(280px,1fr)",
     p.showAssignee ? "150px" : null,
     p.showBrand ? "130px" : null,
     "96px",
-    p.seeAll ? "96px" : null,
+    seeAll ? "96px" : null,
     "96px",
     "150px",
     "170px",
     "64px",
   ].filter(Boolean).join(" ");
 
-  const editable = (t: TaskDTO, field: string) =>
-    p.seeAll || (t.assigneeId === p.viewerId && ["editStatus", "scriptStage", "revisionRound"].includes(field));
+  const editable = (t: TaskDTO, field: string) => canEditField(p.viewer, field, t);
 
   const statusOptions = p.statusField === "scriptStage" ? SCRIPT_STAGES : EDIT_STATUSES;
 
@@ -57,7 +57,7 @@ export default function TaskList(p: Props) {
         {p.showAssignee && <div className="border-l border-line px-2 py-2">Assignee</div>}
         {p.showBrand && <div className="border-l border-line px-2 py-2">Brand</div>}
         <div className="border-l border-line px-2 py-2">Due</div>
-        {p.seeAll && <div className="border-l border-line px-2 py-2">Client due</div>}
+        {seeAll && <div className="border-l border-line px-2 py-2">Client due</div>}
         <div className="border-l border-line px-2 py-2">Priority</div>
         <div className="border-l border-line px-2 py-2">Stage</div>
         <div className="border-l border-line px-2 py-2">{p.statusField === "scriptStage" ? "Script status" : "Edit status"}</div>
@@ -98,6 +98,9 @@ export default function TaskList(p: Props) {
                       <span className="shrink-0 text-[11px] text-muted">{t.code}</span>
                       <span className={cn("truncate", done && "text-muted line-through decoration-muted/40")}>{t.title}</span>
                       <DelayBadge t={t} />
+                      {t.assigneeId !== p.viewer.id && t.collaboratorIds.includes(p.viewer.id) && (
+                        <span className="shrink-0 rounded bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-muted">Collaborator</span>
+                      )}
                     </div>
                     {p.showAssignee && (
                       <div className="flex min-w-0 items-center gap-1.5 px-1">
@@ -112,7 +115,7 @@ export default function TaskList(p: Props) {
                     )}
                     {p.showBrand && (
                       <div className="min-w-0 px-1">
-                        {p.seeAll ? (
+                        {editable(t, "brandId") ? (
                           <CellSelect
                             value={t.brandId ?? ""}
                             options={[{ value: "", label: "No brand" }, ...p.brands.map((b) => ({ value: b.id, label: b.name }))]}
@@ -124,7 +127,7 @@ export default function TaskList(p: Props) {
                       </div>
                     )}
                     <div className="px-2"><DueText date={t.internalDeadline} done={done} /></div>
-                    {p.seeAll && <div className="px-2"><DueText date={t.externalDeadline} done={done} /></div>}
+                    {seeAll && <div className="px-2"><DueText date={t.externalDeadline} done={done} /></div>}
                     <div className="px-1">
                       {editable(t, "priority") ? (
                         <CellSelect value={t.priority} options={opts(PRIORITIES)} onChange={(v) => p.onUpdate(t.id, { priority: v })} />

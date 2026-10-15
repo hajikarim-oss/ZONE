@@ -11,7 +11,8 @@ export type StageKey =
   | "revision"
   | "approved"
   | "delivered"
-  | "closed";
+  | "closed"
+  | "onhold";
 
 export const STAGE_GROUPS: { key: StageKey; label: string; dot: string }[] = [
   { key: "awaiting", label: "Awaiting brief", dot: "#a2a0a2" },
@@ -23,7 +24,23 @@ export const STAGE_GROUPS: { key: StageKey; label: string; dot: string }[] = [
   { key: "approved", label: "Approved", dot: "#5da283" },
   { key: "delivered", label: "Delivered", dot: "#4ecbc4" },
   { key: "closed", label: "Closed", dot: "#6d6e6f" },
+  { key: "onhold", label: "On hold", dot: "#b8a28c" },
 ];
+
+// The five board columns (Asana-style), each covering one or more stages.
+export type BoardKey = "upcoming" | "ongoing" | "revision" | "onhold" | "completed";
+export const BOARD_COLUMNS: { key: BoardKey; label: string; dot: string; stages: StageKey[]; hint: string }[] = [
+  { key: "upcoming", label: "Upcoming", dot: "#8d84e8", stages: ["awaiting", "preprod", "shoot"], hint: "Brief, script, pre-production or shoot — editing hasn't started" },
+  { key: "ongoing", label: "Ongoing", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
+  { key: "revision", label: "Revision", dot: "#fd612c", stages: ["revision"], hint: "Internal or external revisions" },
+  { key: "onhold", label: "On hold", dot: "#b8a28c", stages: ["onhold"], hint: "Paused" },
+  { key: "completed", label: "Completed", dot: "#5da283", stages: ["delivered", "closed"], hint: "Delivered or closed" },
+];
+
+export function boardColumn(p: StatusInput): BoardKey {
+  const k = computeStage(p).key;
+  return BOARD_COLUMNS.find((c) => c.stages.includes(k))?.key ?? "upcoming";
+}
 
 export type StatusInput = {
   briefStage: string;
@@ -36,6 +53,7 @@ export type StatusInput = {
   deliveryStatus: string;
   externalDeadline: Date | string | null;
   internalDeadline: Date | string | null;
+  onHold?: boolean;
 };
 
 export type Stage = { key: StageKey; label: string };
@@ -44,6 +62,7 @@ export function computeStage(p: StatusInput): Stage {
   if (p.deliveryStatus === "Project Closed") return { key: "closed", label: "Closed" };
   if (p.deliveryStatus === "Files Sent" || p.deliveryStatus === "Invoice Raised")
     return { key: "delivered", label: "Delivered" };
+  if (p.onHold) return { key: "onhold", label: "On hold" };
   if (p.editStatus === "Final Approved" || p.finalApproval === "Approved")
     return { key: "approved", label: "Final approved" };
 
@@ -77,7 +96,7 @@ export function isDone(p: StatusInput) {
 // review, or approved but awaiting the brand's sign-off, is with the brand.
 // Everything else is on the team.
 export function waitingOn(p: StatusInput): "TEAM" | "BRAND" | null {
-  if (isDone(p)) return null;
+  if (isDone(p) || p.onHold) return null;
   if (p.editStatus === "First Cut Sent" || p.editStatus === "In Review") return "BRAND";
   if (p.editStatus === "Final Approved" && p.finalApproval !== "Approved") return "BRAND";
   return "TEAM";
@@ -106,7 +125,7 @@ export type Delay = { who: "EDITOR" | "BRAND"; days: number; overdue: boolean } 
 // external deadline while waiting on the brand. Overdue = past the external
 // deadline and not delivered, whoever's fault it is.
 export function computeDelay(p: StatusInput, now = new Date()): Delay {
-  if (isDone(p)) return null;
+  if (isDone(p) || p.onHold) return null;
   const today = startOfToday(now);
   const intDl = toDate(p.internalDeadline);
   const extDl = toDate(p.externalDeadline);
@@ -151,6 +170,8 @@ export function clientStatus(p: StatusInput): string {
       return "Delivered";
     case "closed":
       return "Completed";
+    case "onhold":
+      return "On hold";
   }
 }
 

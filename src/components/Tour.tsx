@@ -83,7 +83,7 @@ function buildSteps(role: string, first: string): Step[] {
     route: "/my-tasks",
     body: (
       <>
-        <p>Everything assigned to you, and only you. The number next to it is how many are still open.</p>
+        <p>Tasks assigned to you, tasks you added, and tasks you've been added to as a <b>collaborator</b>. The number next to it is how many are still open.</p>
         {!seeAll && <p className="mt-2">This replaces your personal tab in the old Team sheet.</p>}
       </>
     ),
@@ -96,7 +96,8 @@ function buildSteps(role: string, first: string): Step[] {
     body: (
       <>
         <p><b>List</b> is the main view: one row per task, with dropdowns you can change right in the row.</p>
-        <p className="mt-2"><b>Board</b> groups cards by stage. <b>Calendar</b> puts tasks on their deadline date.</p>
+        <p className="mt-2"><b>Board</b> has five columns: <b>Upcoming</b>, <b>Ongoing</b>, <b>Revision</b>, <b>On hold</b> and <b>Completed</b>. Drag a card to another column to move it; the status updates for you.</p>
+        <p className="mt-2"><b>Calendar</b> puts tasks on their deadline date.</p>
       </>
     ),
   });
@@ -120,7 +121,7 @@ function buildSteps(role: string, first: string): Step[] {
         <p className="mt-2">
           {seeAll
             ? "You can change every field: assignee, brand, deadlines, priority, type and each pipeline stage."
-            : "You can change the status, revision round and shoot status of your own tasks, and post updates. Everything else is set by your lead."}
+            : "On tasks assigned to you, you can change the status, revision round, shoot status and On hold. On tasks you added yourself you can also change the name, brand, deadline and priority."}
         </p>
       </>
     ),
@@ -169,15 +170,29 @@ function buildSteps(role: string, first: string): Step[] {
   });
 
   s.push({
-    title: "Updates & links",
+    title: "Comments & collaborators",
     body: (
       <>
-        <p>At the bottom of every task panel is <b>Updates &amp; links</b>. Post progress notes, render status or Drive links there (Ctrl + Enter to send). Links become clickable.</p>
-        <p className="mt-2">It replaces the old "Editor notes / links" column, and posting an update counts as updating the task, which stops reminders.</p>
+        <p>At the bottom of every task panel is <b>Comments</b>. Post progress notes, feedback or Drive links (Ctrl + Enter to send). Type <b>@</b> and a name to mention someone: they're notified and added as a collaborator.</p>
+        <p className="mt-2"><b>Collaborators</b> (in the task panel) can see the task and its comments, and get notified of new comments. The assignee or whoever added the task can add or remove them.</p>
         <p className="mt-2">The <b>Activity</b> tab shows every change: who changed what, and when.</p>
       </>
     ),
   });
+
+  if (!seeAll) {
+    s.push({
+      title: "Adding your own task",
+      target: "add-task",
+      route: "/my-tasks",
+      body: (
+        <>
+          <p>Use <b>Add task</b> to log your own work: name, brand, priority and your deadline. It's assigned to you automatically and the admins can see it.</p>
+          <p className="mt-2">Pick <b>+ Collaborator</b> to share it with teammates; only you, your collaborators and the admins / managers can see it.</p>
+        </>
+      ),
+    });
+  }
 
   if (seeAll) {
     s.push({
@@ -193,7 +208,7 @@ function buildSteps(role: string, first: string): Step[] {
       body: (
         <>
           <p>Give it a name, then choose the brand, assignee, priority, <b>team deadline</b> and <b>client deadline</b>. It gets the next code (TBM-…) automatically.</p>
-          <p className="mt-2">The assignee gets a notification and an email straight away. Add brief notes in <b>Context for the team</b> inside the task.</p>
+          <p className="mt-2">The assignee gets a notification and an email straight away; collaborators you add are notified too. Add brief notes in <b>Context for the team</b> inside the task.</p>
         </>
       ),
     });

@@ -6,6 +6,7 @@ import Avatar from "@/components/Avatar";
 import { EDIT_STATUSES, SCRIPT_STAGES } from "@/lib/constants";
 import { isDone } from "@/lib/status";
 import { cn } from "@/lib/utils";
+import { canEditField } from "@/lib/rbac";
 import { BrandChip, CellSelect, DelayBadge, DueText, opts, PriorityPill, StagePill } from "./bits";
 import type { Group } from "./TaskList";
 
@@ -13,8 +14,7 @@ import type { Group } from "./TaskList";
 // inline status dropdown. Tapping a card opens the task panel full-screen.
 export default function TaskCards({
   groups,
-  seeAll,
-  viewerId,
+  viewer,
   statusField,
   showAssignee,
   showBrand,
@@ -23,8 +23,7 @@ export default function TaskCards({
   onUpdate,
 }: {
   groups: Group[];
-  seeAll: boolean;
-  viewerId: string;
+  viewer: { id: string; role: string; seeAll: boolean };
   statusField: "editStatus" | "scriptStage";
   showAssignee: boolean;
   showBrand: boolean;
@@ -54,7 +53,7 @@ export default function TaskCards({
             <div className="space-y-2">
               {g.tasks.map((t) => {
                 const done = isDone(t);
-                const canStatus = seeAll || t.assigneeId === viewerId;
+                const canStatus = canEditField(viewer, statusField, t);
                 return (
                   <div
                     key={t.id}
@@ -71,6 +70,9 @@ export default function TaskCards({
                         <div className="mt-0.5 text-[11px] text-muted">{t.code}</div>
                       </div>
                       {showAssignee && t.assigneeName && <Avatar name={t.assigneeName} size={24} />}
+                      {t.assigneeId !== viewer.id && t.collaboratorIds.includes(viewer.id) && (
+                        <span className="rounded bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-muted">Collaborator</span>
+                      )}
                     </div>
 
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1.5">

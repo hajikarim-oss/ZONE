@@ -27,6 +27,8 @@ model User {
   createdAt    DateTime @default(now())
 
   assigned      Project[]      @relation("Assignee")
+  createdTasks  Project[]      @relation("Creator")
+  collaborating Project[]      @relation("Collaborators")
   notifications Notification[]
   updates       Update[]
 }
@@ -69,6 +71,14 @@ model Project {
   assigneeId String?
   assignee   User?   @relation("Assignee", fields: [assigneeId], references: [id], onDelete: SetNull)
   priority   String  @default("Medium") // High | Medium | Low
+
+  // Who added the task (team members can add their own tasks), and the
+  // people collaborating on it — they can see it and get its comments.
+  createdById   String?
+  createdBy     User?   @relation("Creator", fields: [createdById], references: [id], onDelete: SetNull)
+  collaborators User[]  @relation("Collaborators")
+
+  onHold Boolean @default(false) // board column "On hold"
 
   externalDeadline DateTime?
   internalDeadline DateTime?
