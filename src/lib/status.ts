@@ -31,7 +31,7 @@ export const STAGE_GROUPS: { key: StageKey; label: string; dot: string }[] = [
 export type BoardKey = "upcoming" | "ongoing" | "revision" | "onhold" | "completed";
 export const BOARD_COLUMNS: { key: BoardKey; label: string; dot: string; stages: StageKey[]; hint: string }[] = [
   { key: "upcoming", label: "Upcoming", dot: "#8d84e8", stages: ["awaiting", "preprod", "shoot"], hint: "Brief, script, pre-production or shoot — editing hasn't started" },
-  { key: "ongoing", label: "Ongoing", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
+  { key: "ongoing", label: "In Progress", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
   { key: "revision", label: "Revision", dot: "#fd612c", stages: ["revision"], hint: "Internal or external revisions" },
   { key: "onhold", label: "On hold", dot: "#b8a28c", stages: ["onhold"], hint: "Paused" },
   { key: "completed", label: "Completed", dot: "#5da283", stages: ["delivered", "closed"], hint: "Delivered or closed" },
@@ -40,6 +40,29 @@ export const BOARD_COLUMNS: { key: BoardKey; label: string; dot: string; stages:
 export function boardColumn(p: StatusInput): BoardKey {
   const k = computeStage(p).key;
   return BOARD_COLUMNS.find((c) => c.stages.includes(k))?.key ?? "upcoming";
+}
+
+export function boardStatusPatch(t: StatusInput, to: BoardKey): Record<string, unknown> {
+  if (to === "onhold") return { onHold: true };
+  const patch: Record<string, unknown> = t.onHold ? { onHold: false } : {};
+  if (to === "upcoming") {
+    patch.editStatus = "Not Started";
+    if (t.deliveryStatus === "Files Sent" || t.deliveryStatus === "Project Closed") patch.deliveryStatus = "Not Started";
+    if (t.shootStatus === "Footage Received" || t.shootStatus === "Done") patch.shootStatus = "Scheduled";
+  } else if (to === "ongoing") {
+    patch.editStatus = "In Progress";
+    if (t.deliveryStatus === "Files Sent" || t.deliveryStatus === "Project Closed") patch.deliveryStatus = "Not Started";
+  } else if (to === "revision") {
+    const sentToBrand = t.editStatus === "First Cut Sent" || t.editStatus === "In Review";
+    const round = Math.min(4, Math.max(1, t.revisionRound + (sentToBrand ? 1 : 0)));
+    patch.editStatus = sentToBrand ? `External Revision R${round}` : "Internal Revision R1";
+    if (t.deliveryStatus === "Files Sent" || t.deliveryStatus === "Project Closed") patch.deliveryStatus = "Not Started";
+  } else if (to === "completed") {
+    patch.editStatus = "Final Approved";
+    patch.deliveryStatus = "Files Sent";
+    patch.onHold = false;
+  }
+  return patch;
 }
 
 export type StatusInput = {
@@ -59,10 +82,11 @@ export type StatusInput = {
 export type Stage = { key: StageKey; label: string };
 
 export function computeStage(p: StatusInput): Stage {
+  // On hold takes absolute priority when set
+  if (p.onHold) return { key: "onhold", label: "On hold" };
   if (p.deliveryStatus === "Project Closed") return { key: "closed", label: "Closed" };
   if (p.deliveryStatus === "Files Sent" || p.deliveryStatus === "Invoice Raised")
     return { key: "delivered", label: "Delivered" };
-  if (p.onHold) return { key: "onhold", label: "On hold" };
   if (p.editStatus === "Final Approved" || p.finalApproval === "Approved")
     return { key: "approved", label: "Final approved" };
 

@@ -7,22 +7,22 @@
 export type Viewer = { id: string; role: string; department?: string };
 
 // The parts of a task that decide who can see / edit it.
-export type Access = { assigneeId: string | null; createdById?: string | null; collaboratorIds?: string[] };
+export type Access = { assigneeId: string | null; createdById?: string | null; collaboratorIds?: string[]; brandId?: string | null };
 
 export const isAdmin = (v: Viewer) => v.role === "ADMIN";
 export const canSeeAll = (v: Viewer) => v.role === "ADMIN" || v.role === "MANAGER";
 export const canManageTeam = (v: Viewer) => v.role === "ADMIN";
 export const canManageBrands = (v: Viewer) => v.role === "ADMIN";
-// Everyone on the team can add tasks; team members' tasks are assigned to themselves.
+// Everyone on the team can add tasks; team members can create their own projects within workspaces.
 export const canCreateProjects = (_v: Viewer) => true;
 
 // Fields the assignee may change on their task.
 export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold"]);
 // Extra fields a team member may change on a task they created themselves.
-export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "internalDeadline", "priority", "type", "platform"]);
+export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "startDate", "internalDeadline", "priority", "type", "platform", "storageDeviceId", "assigneeId"]);
 
 export function canViewProject(v: Viewer, p: Access) {
-  return canSeeAll(v) || p.assigneeId === v.id || p.createdById === v.id || !!p.collaboratorIds?.includes(v.id);
+  return canSeeAll(v) || p.assigneeId === v.id || p.createdById === v.id || !!p.collaboratorIds?.includes(v.id) || !!p.brandId;
 }
 
 export function canEditField(v: Viewer, field: string, p: Access) {
@@ -31,8 +31,9 @@ export function canEditField(v: Viewer, field: string, p: Access) {
   return p.assigneeId === v.id && MEMBER_FIELDS.has(field);
 }
 
-export function canManageCollaborators(v: Viewer, p: Access) {
-  return canSeeAll(v) || p.assigneeId === v.id || p.createdById === v.id;
+// Anyone on the team can add teammates to collaborate on tasks in their workspace
+export function canManageCollaborators(_v: Viewer, _p: Access) {
+  return true;
 }
 
 // Prisma filter: the tasks a team member can see.

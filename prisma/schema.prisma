@@ -80,8 +80,10 @@ model Project {
 
   onHold Boolean @default(false) // board column "On hold"
 
-  externalDeadline DateTime?
-  internalDeadline DateTime?
+  // Three-date model: Start (when work begins), End (internal handoff), Due (client/project close)
+  startDate        DateTime? // when work begins (datetime, team-visible)
+  externalDeadline DateTime? // Due Date — client-facing / project-close date
+  internalDeadline DateTime? // End Date — internal handoff deadline
 
   briefStage     String @default("Not Started")
   scriptStage    String @default("Not Started")
@@ -93,8 +95,13 @@ model Project {
   finalApproval  String @default("Pending")
   deliveryStatus String @default("Not Started")
 
-  notes   String? // internal notes (admin/manager)
-  context String? // "context from Sachin" — shown read-only to the assignee
+  notes          String? // internal notes (admin/manager)
+  context        String? // "context from Sachin" — shown read-only to the assignee
+  estimatedHours Float?  // time allocation (admin visibility)
+
+  // Storage tracking — which physical drive / folder holds the project files
+  storageDeviceId String?
+  storageDevice   StorageDevice? @relation(fields: [storageDeviceId], references: [id], onDelete: SetNull)
 
   extDeadlineChanges Int @default(0)
   intDeadlineChanges Int @default(0)
@@ -109,12 +116,19 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  updates  Update[]
-  activity Activity[]
+  // Subtask support (Asana-style, one level deep)
+  parentId String?
+  parent   Project?  @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
+  subtasks Project[] @relation("Subtasks")
+
+  updates     Update[]
+  activity    Activity[]
+  attachments Attachment[]
 
   @@index([assigneeId])
   @@index([brandId])
   @@index([archived])
+  @@index([parentId])
 }
 
 // Editor notes / links thread on a project (old "EDITOR NOTES / LINKS" col)
@@ -164,4 +178,25 @@ model AutomationRun {
   source String   // "Scheduled (8:00 AM)" or "Run now by <name>"
   result String   // JSON counts
   ranAt  DateTime @default(now())
+}
+
+// Physical storage devices / folders where project files live (dropdown in task panel)
+model StorageDevice {
+  id        String    @id @default(cuid())
+  name      String    @unique // "WD 4TB Black", "Seagate NAS 2", etc.
+  createdAt DateTime  @default(now())
+  projects  Project[]
+}
+
+// File attachments on a task — primarily Google Drive links, optionally uploaded files
+model Attachment {
+  id        String   @id @default(cuid())
+  projectId String
+  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  addedById String?  // userId who attached it
+  url       String   // Drive URL or blob key
+  label     String?  // optional display name
+  createdAt DateTime @default(now())
+
+  @@index([projectId])
 }

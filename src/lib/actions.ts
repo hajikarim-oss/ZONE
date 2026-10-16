@@ -11,7 +11,7 @@ import {
   BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPARTMENTS, DEPTS, EDIT_STATUSES, FINAL_APPROVAL,
   PREPRO_STAGES, PRIORITIES, REVISION_ALERT_ROUND, ROLES, SCRIPT_STAGES, SHOOT_STATUSES,
 } from "@/lib/constants";
-import { forViewer, taskInclude, toTaskDTO, type TaskDTO } from "@/lib/dto";
+import { forViewer, taskInclude, toAttachmentDTO, toTaskDTO, type AttachmentDTO, type TaskDTO } from "@/lib/dto";
 import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert } from "@/lib/notify";
 import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
 import { runDailyAutomations, type DailyResult } from "@/lib/automations";
@@ -29,9 +29,10 @@ const ENUMS: Record<string, readonly string[]> = {
   deliveryStatus: DELIVERY_STATUSES,
 };
 const TEXT = new Set(["title", "type", "platform", "notes", "context"]);
-const DATES = new Set(["externalDeadline", "internalDeadline"]);
-const REFS = new Set(["brandId", "assigneeId"]);
+const DATES = new Set(["externalDeadline", "internalDeadline", "startDate"]);
+const REFS = new Set(["brandId", "assigneeId", "storageDeviceId"]);
 const BOOLS = new Set(["onHold"]);
+const NUMS = new Set(["estimatedHours"]);
 
 // Run slow side work (history, notifications, emails) after the response is
 // sent, so the person clicking doesn't wait for it.
@@ -46,8 +47,8 @@ function later(label: string, fn: () => Promise<unknown>) {
 }
 
 // Who can see / edit a task, from a loaded row.
-function access(p: { assigneeId: string | null; createdById: string | null; collaborators: { id: string }[] }): Access {
-  return { assigneeId: p.assigneeId, createdById: p.createdById, collaboratorIds: p.collaborators.map((c) => c.id) };
+function access(p: { assigneeId: string | null; createdById: string | null; collaborators: { id: string }[]; brandId?: string | null }): Access {
+  return { assigneeId: p.assigneeId, createdById: p.createdById, collaboratorIds: p.collaborators.map((c) => c.id), brandId: p.brandId };
 }
 
 // Link to a task for a given person (team members open it from My tasks).
@@ -60,8 +61,9 @@ const FIELD_LABEL: Record<string, string> = {
   briefStage: "Brief", scriptStage: "Concept / script", preProStage: "Pre-pro", shootStatus: "Shoot",
   editStatus: "Edit status", revisionRound: "Revision round", clientReview: "Client review",
   finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Context",
-  externalDeadline: "External deadline", internalDeadline: "Internal deadline", brandId: "Brand", assigneeId: "Assignee",
-  onHold: "On hold",
+  startDate: "Start date", externalDeadline: "Due date", internalDeadline: "End date",
+  brandId: "Brand", assigneeId: "Assignee", storageDeviceId: "Storage",
+  onHold: "On hold", estimatedHours: "Estimated hours",
 };
 
 function coerce(field: string, raw: unknown): unknown {
@@ -88,6 +90,12 @@ function coerce(field: string, raw: unknown): unknown {
   }
   if (REFS.has(field)) return raw ? String(raw) : null;
   if (BOOLS.has(field)) return raw === true || raw === "true";
+  if (NUMS.has(field)) {
+    if (!raw && raw !== 0) return null;
+    const n = Number(raw);
+    if (isNaN(n) || n < 0) throw new Error(`Invalid value for ${FIELD_LABEL[field]}`);
+    return n;
+  }
   throw new Error(`Unknown field ${field}`);
 }
 
@@ -115,6 +123,17 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
 
   // Auto-fills carried over from the Apps Script
   if (typeof data.editStatus === "string") {
+    // If moving to In Progress or Revision, take off hold and uncomplete so board syncs
+    if (data.editStatus === "In Progress" || data.editStatus.includes("Revision")) {
+      if (before.onHold && data.onHold === undefined) data.onHold = false;
+      if (
+        (before.deliveryStatus === "Files Sent" || before.deliveryStatus === "Project Closed" || before.deliveryStatus === "Invoice Raised") &&
+        data.deliveryStatus === undefined
+      ) {
+        data.deliveryStatus = "Not Started";
+        data.closedAt = null;
+      }
+    }
     const m = (data.editStatus as string).match(/^External Revision R(\d)/);
     if (m && data.revisionRound === undefined) data.revisionRound = Math.max(before.revisionRound, Number(m[1]));
     if (data.editStatus === "Final Approved" && before.finalApproval !== "Approved" && data.finalApproval === undefined)
@@ -146,6 +165,7 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
     const names = async (f: string, v: unknown) => {
       if (f === "brandId" && v) return (await prisma.brand.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "assigneeId" && v) return (await prisma.user.findUnique({ where: { id: String(v) } }))?.name ?? "—";
+      if (f === "storageDeviceId" && v) return (await prisma.storageDevice.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       return show(v, f);
     };
     await prisma.activity.createMany({
@@ -187,12 +207,14 @@ export async function createTask(input: {
   title: string;
   brandId?: string | null;
   assigneeId?: string | null;
+  startDate?: string | null;
   internalDeadline?: string | null;
   externalDeadline?: string | null;
   priority?: string;
   type?: string | null;
   platform?: string | null;
   collaboratorIds?: string[];
+  parentId?: string | null;
 }): Promise<TaskDTO> {
   const me = await requireTeamUser();
   if (!canCreateProjects(me)) throw new Error("You can't add tasks");
@@ -205,15 +227,17 @@ export async function createTask(input: {
       code: await nextCode(),
       title,
       brandId: input.brandId || null,
-      // Team members add tasks for themselves (like Asana's My tasks)
-      assigneeId: seeAll ? input.assigneeId || null : me.id,
+      // Assigned to chosen teammate, or defaults to creator (or null for admins/managers)
+      assigneeId: input.assigneeId || (seeAll ? null : me.id),
       createdById: me.id,
       collaborators: collabIds.length ? { connect: collabIds.map((id) => ({ id })) } : undefined,
       priority: input.priority && PRIORITIES.includes(input.priority as any) ? input.priority : "Medium",
       type: input.type || null,
       platform: input.platform || null,
+      startDate: input.startDate ? new Date(input.startDate) : null,
       internalDeadline: input.internalDeadline ? new Date(input.internalDeadline) : null,
       externalDeadline: seeAll && input.externalDeadline ? new Date(input.externalDeadline) : null,
+      parentId: input.parentId || null,
       lastTeamUpdateAt: new Date(),
     },
     include: taskInclude,
@@ -302,9 +326,19 @@ export async function getTaskThread(id: string): Promise<{ updates: UpdateDTO[];
     updates: updates.map((u) => ({ id: u.id, authorId: u.authorId, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() })),
     // Team members don't see client-deadline changes in the history either
     activity: activity
-      .filter((a) => canSeeAll(me) || a.field !== "External deadline")
+      .filter((a) => canSeeAll(me) || a.field !== "Due date")
       .map((a) => ({ ...a, createdAt: a.createdAt.toISOString() })),
   };
+}
+
+export async function getSubtasks(parentId: string): Promise<TaskDTO[]> {
+  const me = await requireTeamUser();
+  const rows = await prisma.project.findMany({
+    where: { parentId },
+    include: taskInclude,
+    orderBy: { createdAt: "asc" },
+  });
+  return rows.map((r) => forViewer(toTaskDTO(r), canSeeAll(me)));
 }
 
 // Comments (Asana-style). Everyone on the task is notified; @Name mentions
@@ -378,6 +412,71 @@ export async function markAllNotificationsRead() {
   const me = await requireTeamUser();
   await prisma.notification.updateMany({ where: { userId: me.id, read: false }, data: { read: true } });
   revalidatePath("/", "layout");
+}
+
+// ───────────────────────── Attachments ─────────────────────────
+
+export async function getAttachments(projectId: string): Promise<AttachmentDTO[]> {
+  const [me, p] = await Promise.all([
+    requireTeamUser(),
+    prisma.project.findUnique({ where: { id: projectId }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } }),
+  ]);
+  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
+  const rows = await prisma.attachment.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } });
+  return rows.map(toAttachmentDTO);
+}
+
+export async function addAttachment(projectId: string, url: string, label?: string): Promise<AttachmentDTO> {
+  const trimUrl = url.trim();
+  if (!trimUrl) throw new Error("URL is required");
+  const [me, p] = await Promise.all([
+    requireTeamUser(),
+    prisma.project.findUnique({ where: { id: projectId }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } }),
+  ]);
+  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
+  const a = await prisma.attachment.create({
+    data: { projectId, addedById: me.id, url: trimUrl, label: label?.trim() || null },
+  });
+  later("attachment history", () =>
+    prisma.activity.create({ data: { projectId, actorName: me.name, field: "Attachment", toValue: `Added: ${label?.trim() || trimUrl.slice(0, 60)}` } }),
+  );
+  return toAttachmentDTO(a);
+}
+
+export async function deleteAttachment(id: string) {
+  const me = await requireTeamUser();
+  const a = await prisma.attachment.findUnique({ where: { id } });
+  if (!a) return;
+  // Can delete your own; admins/managers can delete any
+  if (a.addedById !== me.id && !canSeeAll(me)) throw new Error("You can only remove your own attachments");
+  await prisma.attachment.delete({ where: { id } });
+}
+
+// ───────────────────────── Storage Devices ─────────────────────────
+
+export async function listStorageDevices(): Promise<{ id: string; name: string }[]> {
+  await requireTeamUser();
+  const devices = await prisma.storageDevice.findMany({ orderBy: { name: "asc" } });
+  return devices.map((d) => ({ id: d.id, name: d.name }));
+}
+
+export async function createStorageDevice(name: string): Promise<{ id: string; name: string }> {
+  const me = await requireTeamUser();
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Storage device name is required");
+  if (await prisma.storageDevice.findFirst({ where: { name: { equals: trimmed, mode: "insensitive" } } }))
+    throw new Error("A device with that name already exists");
+  const d = await prisma.storageDevice.create({ data: { name: trimmed } });
+  later("storage device created", () =>
+    prisma.activity.create({ data: { projectId: "system", actorName: me.name, field: "Storage device", toValue: `Created: ${trimmed}` } }).catch(() => {}),
+  );
+  return { id: d.id, name: d.name };
+}
+
+export async function deleteStorageDevice(id: string) {
+  const me = await requireTeamUser();
+  if (!isAdmin(me)) throw new Error("Only admins can remove storage devices");
+  await prisma.storageDevice.delete({ where: { id } });
 }
 
 // ───────────────────────── Team (TEAM REGISTRY) ─────────────────────────

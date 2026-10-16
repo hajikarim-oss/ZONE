@@ -5,7 +5,9 @@ import { canSeeAll, isAdmin, visibleToMember } from "@/lib/rbac";
 
 // Data every task view needs: the tasks, plus people/brands for dropdowns.
 export async function loadWorkspace(me: User, where: Prisma.ProjectWhereInput) {
-  const scoped: Prisma.ProjectWhereInput = canSeeAll(me) ? where : { AND: [where, visibleToMember(me.id)] };
+  // Brand workspaces are open to all team members: "Anyone can view, add teammates, and create their own projects within their workspace"
+  const isBrandWorkspace = Boolean(where.brandId);
+  const scoped: Prisma.ProjectWhereInput = (canSeeAll(me) || isBrandWorkspace) ? where : { AND: [where, visibleToMember(me.id)] };
   const [tasks, people, brands] = await Promise.all([
     prisma.project.findMany({ where: scoped, include: taskInclude, orderBy: { code: "asc" } }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),

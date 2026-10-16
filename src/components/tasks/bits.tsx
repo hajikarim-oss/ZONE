@@ -3,6 +3,7 @@
 import { computeStage, computeDelay, priorityColor, STAGE_GROUPS } from "@/lib/status";
 import type { TaskDTO } from "@/lib/dto";
 import { cn, relativeDue } from "@/lib/utils";
+import { Pause } from "lucide-react";
 
 export function StagePill({ t, className }: { t: TaskDTO; className?: string }) {
   const s = computeStage(t);
@@ -55,6 +56,20 @@ export function DelayBadge({ t }: { t: TaskDTO }) {
     >
       {d.who === "EDITOR" ? "Team late" : "Waiting on brand"} · {d.days}d
     </span>
+  );
+}
+
+export function OnHoldBadge({ onHold, onClick, canEdit }: { onHold: boolean; onClick?: () => void; canEdit?: boolean }) {
+  if (!onHold) return null;
+  return (
+    <button
+      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
+      disabled={!canEdit || !onClick}
+      title={canEdit ? "Take off hold" : "On hold"}
+      className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 disabled:cursor-default"
+    >
+      <Pause className="h-2.5 w-2.5" /> On hold
+    </button>
   );
 }
 

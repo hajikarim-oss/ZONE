@@ -125,7 +125,7 @@ export default function TaskWorkspace(props: Props) {
       .filter((t) => !brandF || t.brandId === brandF)
       .filter((t) => !personF || (personF === "none" ? !t.assigneeId : t.assigneeId === personF))
       .filter((t) => !prioF || t.priority === prioF)
-      .filter((t) => !needle || `${t.code} ${t.title} ${t.brandName ?? ""} ${t.assigneeName ?? ""}`.toLowerCase().includes(needle))
+      .filter((t) => !needle || `${t.code} ${t.title} ${t.brandName ?? ""} ${t.assigneeName ?? ""} ${t.storageDeviceName ?? ""}`.toLowerCase().includes(needle))
       .sort(byDue);
   }, [tasks, q, brandF, personF, prioF]);
   // …and the list / calendar hide finished work unless asked.
@@ -166,6 +166,7 @@ export default function TaskWorkspace(props: Props) {
   const [newTitle, setNewTitle] = useState("");
   const [newBrand, setNewBrand] = useState(props.fixedBrandId ?? "");
   const [newPerson, setNewPerson] = useState("");
+  const [newStartDate, setNewStartDate] = useState("");
   const [newDue, setNewDue] = useState("");
   const [newExtDue, setNewExtDue] = useState("");
   const [newPrio, setNewPrio] = useState("Medium");
@@ -180,6 +181,7 @@ export default function TaskWorkspace(props: Props) {
           title: newTitle,
           brandId: newBrand || null,
           assigneeId: newPerson || null,
+          startDate: newStartDate || null,
           internalDeadline: newDue || null,
           externalDeadline: newExtDue || null,
           priority: newPrio,
@@ -187,6 +189,7 @@ export default function TaskWorkspace(props: Props) {
         });
         setTasks((ts) => [t, ...ts]);
         setNewTitle("");
+        setNewStartDate("");
         setNewCollabs([]);
         flash(`${t.code} added`);
       } catch (err) {
@@ -294,11 +297,14 @@ export default function TaskWorkspace(props: Props) {
               {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
             </select>
             <label className="flex items-center gap-1 text-[12px] text-muted">
-              {viewer.seeAll ? "Team" : "Due"} <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto" />
+              Start <input type="date" value={newStartDate} onChange={(e) => setNewStartDate(e.target.value)} className="field-input w-auto" />
+            </label>
+            <label className="flex items-center gap-1 text-[12px] text-muted">
+              End <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto" />
             </label>
             {viewer.seeAll && (
               <label className="flex items-center gap-1 text-[12px] text-muted">
-                Client <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto" />
+                Due <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto" />
               </label>
             )}
             <select
@@ -346,6 +352,7 @@ export default function TaskWorkspace(props: Props) {
               <div className="hidden md:block">
               <TaskList
                 groups={groups}
+                allTasks={matching}
                 people={people}
                 brands={brands}
                 viewer={viewer}
@@ -386,6 +393,7 @@ export default function TaskWorkspace(props: Props) {
           brands={brands}
           viewer={viewer}
           onClose={() => open(null)}
+          onOpen={(id) => open(id)}
           onReplace={(fresh) => setTasks((ts) => ts.map((t) => (t.id === fresh.id ? fresh : t)))}
           onUpdate={onUpdate}
           onRemoved={(id) => {
