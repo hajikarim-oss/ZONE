@@ -10,9 +10,10 @@ import {
   type ActivityDTO, type UpdateDTO,
 } from "@/lib/actions";
 import {
-  BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPTS, EDIT_STATUSES, FINAL_APPROVAL, PLATFORMS,
+  BRIEF_STAGES, DEPTS, EDIT_STATUSES, PLATFORMS,
   PREPRO_STAGES, PRIORITIES, REVISION_ROUNDS, SCRIPT_STAGES, SHOOT_STATUSES, TYPES,
 } from "@/lib/constants";
+import { BOARD_COLUMNS, boardColumn, boardStatusPatch, type BoardKey } from "@/lib/status";
 import type { AttachmentDTO, BrandDTO, PersonDTO, StorageDeviceDTO, TaskDTO } from "@/lib/dto";
 import { canEditField, canManageCollaborators } from "@/lib/rbac";
 import { cn, fmtDate, fmtDateTime, toInputDate } from "@/lib/utils";
@@ -29,6 +30,8 @@ type Props = {
   onRemoved: (id: string) => void;
   onReplace: (task: TaskDTO) => void;
 };
+
+const BOARD_STATUS_OPTS = BOARD_COLUMNS.map((c) => ({ value: c.key, label: c.label }));
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -545,15 +548,20 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
 
           <h3 className="mb-1 mt-6 text-[12px] font-semibold uppercase tracking-wide text-muted">Pipeline</h3>
           <div className="space-y-0.5">
+            <Row label="Status">
+              <CellSelect
+                value={boardColumn(t)}
+                disabled={!can("editStatus") && !can("onHold")}
+                options={BOARD_STATUS_OPTS}
+                onChange={(v) => onUpdate(t.id, boardStatusPatch(t, v as BoardKey))}
+              />
+            </Row>
             <Row label="Brief"><CellSelect value={t.briefStage} disabled={!can("briefStage")} options={opts(BRIEF_STAGES)} onChange={set("briefStage")} /></Row>
             <Row label="Concept / script"><CellSelect value={t.scriptStage} disabled={!can("scriptStage")} options={opts(SCRIPT_STAGES)} onChange={set("scriptStage")} /></Row>
             <Row label="Pre-pro"><CellSelect value={t.preProStage} disabled={!can("preProStage")} options={opts(PREPRO_STAGES)} onChange={set("preProStage")} /></Row>
             <Row label="Shoot"><CellSelect value={t.shootStatus} disabled={!can("shootStatus")} options={opts(SHOOT_STATUSES)} onChange={set("shootStatus")} /></Row>
             <Row label="Edit status"><CellSelect value={t.editStatus} disabled={!can("editStatus")} options={opts(EDIT_STATUSES)} onChange={set("editStatus")} /></Row>
             <Row label="Revision round"><CellSelect value={String(t.revisionRound)} disabled={!can("revisionRound")} options={opts(REVISION_ROUNDS)} onChange={set("revisionRound")} /></Row>
-            <Row label="Client review"><CellSelect value={t.clientReview} disabled={!can("clientReview")} options={opts(CLIENT_REVIEW)} onChange={set("clientReview")} /></Row>
-            <Row label="Final approval"><CellSelect value={t.finalApproval} disabled={!can("finalApproval")} options={opts(FINAL_APPROVAL)} onChange={set("finalApproval")} /></Row>
-            <Row label="Delivery"><CellSelect value={t.deliveryStatus} disabled={!can("deliveryStatus")} options={opts(DELIVERY_STATUSES)} onChange={set("deliveryStatus")} /></Row>
           </div>
 
           {/* Subtasks */}

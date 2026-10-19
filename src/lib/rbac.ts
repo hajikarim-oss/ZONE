@@ -17,7 +17,7 @@ export const canManageBrands = (v: Viewer) => v.role === "ADMIN";
 export const canCreateProjects = (_v: Viewer) => true;
 
 // Fields the assignee may change on their task.
-export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold"]);
+export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold", "deliveryStatus"]);
 // Extra fields a team member may change on a task they created themselves.
 export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "startDate", "internalDeadline", "priority", "type", "platform", "storageDeviceId", "assigneeId"]);
 

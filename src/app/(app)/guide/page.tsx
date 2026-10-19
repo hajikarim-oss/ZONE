@@ -122,15 +122,13 @@ export default async function GuidePage() {
             <Table
               head={["Step", "Options", "Notes"]}
               rows={[
+                ["Status", "Upcoming → Ongoing → Revision → On hold → Completed", "The main stage tracking the deliverable across the board."],
                 ["Brief", "Not Started → Brief Received → Brief Call Done", ""],
                 ["Concept / script", "Not Started → In Progress → Sent to Client → Approved", "Creative team members update this one; it's the status column in their list."],
                 ["Pre-pro", "Not Started → In Progress → Complete", ""],
                 ["Shoot", "Not Started → Scheduled → Done → Footage Received", "Footage Received means editing can start."],
                 ["Edit status", "Not Started → In Progress → First Cut Ready → First Cut Sent → In Review → Internal Revision R1–R4 / External Revision R1–R4 → Final Approved", "The main status editors update."],
                 ["Revision round", "0–4", "Set automatically by External Revision Rn; can also be set by hand."],
-                ["Client review", "Pending / Received / NA", ""],
-                ["Final approval", "Pending / Approved / NA", "Set to Approved automatically when Edit status becomes Final Approved."],
-                ["Delivery", "Not Started → Files Sent → Invoice Raised → Project Closed", "Files Sent = delivered. Project Closed = done; it moves to Completed after 30 days."],
               ]}
             />
             <p><b>Internal revision</b> = changes asked for by TBM before the brand sees it. <b>External revision</b> = changes asked for by the brand.</p>

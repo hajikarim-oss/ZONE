@@ -31,7 +31,7 @@ export const STAGE_GROUPS: { key: StageKey; label: string; dot: string }[] = [
 export type BoardKey = "upcoming" | "ongoing" | "revision" | "onhold" | "completed";
 export const BOARD_COLUMNS: { key: BoardKey; label: string; dot: string; stages: StageKey[]; hint: string }[] = [
   { key: "upcoming", label: "Upcoming", dot: "#8d84e8", stages: ["awaiting", "preprod", "shoot"], hint: "Brief, script, pre-production or shoot — editing hasn't started" },
-  { key: "ongoing", label: "In Progress", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
+  { key: "ongoing", label: "Ongoing", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
   { key: "revision", label: "Revision", dot: "#fd612c", stages: ["revision"], hint: "Internal or external revisions" },
   { key: "onhold", label: "On hold", dot: "#b8a28c", stages: ["onhold"], hint: "Paused" },
   { key: "completed", label: "Completed", dot: "#5da283", stages: ["delivered", "closed"], hint: "Delivered or closed" },
