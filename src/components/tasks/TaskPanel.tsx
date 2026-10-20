@@ -35,6 +35,15 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="grid grid-cols-[96px_1fr] items-center gap-1 px-2 py-1 sm:border-b sm:border-line/70 sm:odd:border-r">
+      <div className="pl-1 text-[12px] text-muted">{label}</div>
+      <div className="min-w-0">{children}</div>
+    </div>
+  );
+}
+
 // Linkify drive links and highlight @mentions in comments
 function RichText({ text, names = [] }: { text: string; names?: string[] }) {
   const mention = names.length
@@ -360,40 +369,6 @@ export default function TaskPanel({ task: t, people, brands, storages, onStorage
                 {t.intDeadlineChanges > 0 && <span className="text-[11px] text-amber-700">pushed ×{t.intDeadlineChanges}</span>}
               </div>
             </Row>
-            <Row label="Start → End">
-              <div className="flex flex-wrap items-center gap-1 pl-1">
-                <input
-                  type="datetime-local"
-                  disabled={!can("startAt")}
-                  value={toInputDateTime(t.startAt)}
-                  onChange={(e) => onUpdate(t.id, { startAt: fromInputDateTime(e.target.value) })}
-                  className="cell-select w-auto"
-                  title="When the work started"
-                />
-                <span className="text-muted">→</span>
-                <input
-                  type="datetime-local"
-                  disabled={!can("endAt")}
-                  value={toInputDateTime(t.endAt)}
-                  onChange={(e) => onUpdate(t.id, { endAt: fromInputDateTime(e.target.value) })}
-                  className="cell-select w-auto"
-                  title="When it's planned to end (can be the same day, different time)"
-                />
-              </div>
-            </Row>
-            {seeAll && (
-              <Row label="Client deadline">
-                <div className="flex items-center gap-2 pl-1">
-                  <input
-                    type="date"
-                    value={toInputDate(t.externalDeadline)}
-                    onChange={(e) => onUpdate(t.id, { externalDeadline: e.target.value || null })}
-                    className="cell-select w-auto"
-                  />
-                  {t.extDeadlineChanges > 0 && <span className="text-[11px] text-amber-700">pushed ×{t.extDeadlineChanges}</span>}
-                </div>
-              </Row>
-            )}
             <Row label="Projects">
               <div className="flex flex-wrap items-center gap-2 pl-1">
                 <span className="inline-flex min-w-0 items-center gap-1.5">
@@ -414,19 +389,59 @@ export default function TaskPanel({ task: t, people, brands, storages, onStorage
                 </span>
               </div>
             </Row>
-            <Row label="Priority"><CellSelect value={t.priority} disabled={!can("priority")} options={opts(PRIORITIES)} onChange={set("priority")} /></Row>
-            <Row label="Storage">
-              <StoragePicker
-                value={t.storageId}
-                storages={storages}
-                disabled={!can("storageId")}
-                onChange={(id) => onUpdate(t.id, { storageId: id })}
-                onCreated={onStorageCreated}
-                onError={setErr}
-              />
-            </Row>
-            <Row label="Type"><CellSelect value={t.type ?? ""} disabled={!can("type")} options={opts(TYPES)} onChange={set("type")} /></Row>
-            <Row label="Platform"><CellSelect value={t.platform ?? ""} disabled={!can("platform")} options={opts(PLATFORMS)} onChange={set("platform")} /></Row>
+          </div>
+
+          {/* Fields — like Asana's custom-field box */}
+          <div className="mt-4 overflow-hidden rounded-lg border border-line">
+            <div className="border-b border-line bg-canvas px-3 py-1.5 text-[12px] font-medium text-muted">Fields</div>
+            <div className="grid grid-cols-1 divide-y divide-line/70 sm:grid-cols-2 sm:divide-y-0">
+              <Field label="Priority"><CellSelect value={t.priority} disabled={!can("priority")} options={opts(PRIORITIES)} onChange={set("priority")} /></Field>
+              <Field label="Storage">
+                <StoragePicker
+                  value={t.storageId}
+                  storages={storages}
+                  disabled={!can("storageId")}
+                  onChange={(id) => onUpdate(t.id, { storageId: id })}
+                  onCreated={onStorageCreated}
+                  onError={setErr}
+                />
+              </Field>
+              <Field label="Start">
+                <input
+                  type="datetime-local"
+                  disabled={!can("startAt")}
+                  value={toInputDateTime(t.startAt)}
+                  onChange={(e) => onUpdate(t.id, { startAt: fromInputDateTime(e.target.value) })}
+                  className="cell-select"
+                  title="When the work started"
+                />
+              </Field>
+              <Field label="End">
+                <input
+                  type="datetime-local"
+                  disabled={!can("endAt")}
+                  value={toInputDateTime(t.endAt)}
+                  onChange={(e) => onUpdate(t.id, { endAt: fromInputDateTime(e.target.value) })}
+                  className="cell-select"
+                  title="When it's planned to end (can be the same day, different time)"
+                />
+              </Field>
+              <Field label="Type"><CellSelect value={t.type ?? ""} disabled={!can("type")} options={opts(TYPES)} onChange={set("type")} /></Field>
+              <Field label="Platform"><CellSelect value={t.platform ?? ""} disabled={!can("platform")} options={opts(PLATFORMS)} onChange={set("platform")} /></Field>
+              {seeAll && (
+                <Field label="Client deadline">
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="date"
+                      value={toInputDate(t.externalDeadline)}
+                      onChange={(e) => onUpdate(t.id, { externalDeadline: e.target.value || null })}
+                      className="cell-select"
+                    />
+                    {t.extDeadlineChanges > 0 && <span className="shrink-0 text-[11px] text-amber-700">×{t.extDeadlineChanges}</span>}
+                  </div>
+                </Field>
+              )}
+            </div>
           </div>
 
           <h3 className="mb-1.5 mt-6 text-[13px] font-medium text-muted">Description</h3>

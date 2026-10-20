@@ -7,6 +7,7 @@ import type { TaskDTO } from "@/lib/dto";
 import { BOARD_COLUMNS, boardColumn, type BoardKey } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { BrandChip, DelayBadge, DueText, PriorityPill } from "./bits";
+import { QuickAddRow } from "./TaskList";
 
 export { dropPatch } from "@/lib/board";
 
@@ -16,12 +17,14 @@ export default function TaskBoard({
   showAssignee,
   onOpen,
   onMove,
+  onQuickAdd,
 }: {
   tasks: TaskDTO[];
   selectedId: string | null;
   showAssignee: boolean;
   onOpen: (id: string) => void;
   onMove: (task: TaskDTO, to: BoardKey) => void;
+  onQuickAdd?: (col: string, title: string) => Promise<void>;
 }) {
   const [dragId, setDragId] = useState<string | null>(null);
   const [over, setOver] = useState<BoardKey | null>(null);
@@ -108,10 +111,15 @@ export default function TaskBoard({
                   </div>
                 </button>
               ))}
-              {items.length === 0 && (
-                <div className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[12px] text-muted">
-                  {dragId ? "Drop here" : "Nothing here"}
-                </div>
+              {items.length === 0 && dragId && (
+                <div className="rounded-lg border border-dashed border-line px-3 py-6 text-center text-[12px] text-muted">Drop here</div>
+              )}
+              {onQuickAdd && (
+                <QuickAddRow
+                  onAdd={(title) => onQuickAdd(col.key, title)}
+                  placeholder="+ Add task"
+                  className="rounded-lg px-3 py-2 hover:bg-surface"
+                />
               )}
             </div>
           </div>

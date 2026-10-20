@@ -22,7 +22,39 @@ type Props = {
   selectedId: string | null;
   onOpen: (id: string) => void;
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
+  onQuickAdd?: (groupKey: string, title: string) => Promise<void>;
 };
+
+// "Add task…" line at the bottom of a section (Asana-style)
+export function QuickAddRow({ onAdd, className, placeholder = "Add task…" }: { onAdd: (title: string) => Promise<void>; className?: string; placeholder?: string }) {
+  const [v, setV] = useState("");
+  const [busy, setBusy] = useState(false);
+  return (
+    <form
+      className={className}
+      onSubmit={async (e) => {
+        e.preventDefault();
+        const t = v.trim();
+        if (!t || busy) return;
+        setBusy(true);
+        setV("");
+        try {
+          await onAdd(t);
+        } finally {
+          setBusy(false);
+        }
+      }}
+    >
+      <input
+        value={v}
+        onChange={(e) => setV(e.target.value)}
+        onKeyDown={(e) => e.key === "Escape" && (e.target as HTMLInputElement).blur()}
+        placeholder={placeholder}
+        className="w-full bg-transparent text-[13px] text-muted outline-none placeholder:text-muted/70 focus:text-ink"
+      />
+    </form>
+  );
+}
 
 // Asana-style list: one quiet row per task, inline dropdowns, collapsible
 // sections. Grid template keeps columns aligned across sections.
@@ -151,7 +183,10 @@ export default function TaskList(p: Props) {
                   </div>
                 );
               })}
-            {!isCollapsed && g.tasks.length === 0 && <div className="py-2 pl-8 text-[12px] text-muted">No tasks</div>}
+            {!isCollapsed && p.onQuickAdd && (
+              <QuickAddRow onAdd={(title) => p.onQuickAdd!(g.key, title)} className="border-b border-line/70 py-1.5 pl-8 pr-2" />
+            )}
+            {!isCollapsed && !p.onQuickAdd && g.tasks.length === 0 && <div className="py-2 pl-8 text-[12px] text-muted">No tasks</div>}
           </section>
         );
       })}

@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarDays, Columns3, List, Plus, Search } from "lucide-react";
+import { CalendarDays, CheckCircle2, Columns3, List, Plus, Rows3, Search, SlidersHorizontal } from "lucide-react";
 import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createTask, updateTask } from "@/lib/actions";
@@ -74,6 +74,7 @@ export default function TaskWorkspace(props: Props) {
   const [personF, setPersonF] = useState("");
   const [prioF, setPrioF] = useState("");
   const [showDone, setShowDone] = useState(mode === "archive" || !!props.showDoneDefault);
+  const activeFilters = [brandF, personF, prioF, q.trim()].filter(Boolean).length;
   const [toast, setToast] = useState<string | null>(null);
   const [, start] = useTransition();
 
@@ -158,9 +159,13 @@ export default function TaskWorkspace(props: Props) {
   const groups: Group[] = useMemo(() => {
     if (groupBy === "none") return [{ key: "all", label: "", tasks: filtered }];
     if (groupBy === "board")
-      return BOARD_COLUMNS.map((c) => ({ key: c.key, label: c.label, color: c.dot, tasks: filtered.filter((t) => boardColumn(t) === c.key) })).filter(
-        (g) => g.tasks.length,
-      );
+      // Like Asana sections: every status shows (even empty) so you can add straight into it
+      return BOARD_COLUMNS.filter((c) => showDone || c.key !== "completed").map((c) => ({
+        key: c.key,
+        label: c.label,
+        color: c.dot,
+        tasks: filtered.filter((t) => boardColumn(t) === c.key),
+      }));
     if (groupBy === "stage")
       return STAGE_GROUPS.map((g) => ({ key: g.key, label: g.label, color: g.dot, tasks: filtered.filter((t) => computeStage(t).key === g.key) })).filter(
         (g) => g.tasks.length,
@@ -183,7 +188,7 @@ export default function TaskWorkspace(props: Props) {
       m.get(k)!.tasks.push(t);
     }
     return [...m.values()].sort((a, b) => (a.key === "none" ? 1 : b.key === "none" ? -1 : a.label.localeCompare(b.label)));
-  }, [filtered, groupBy]);
+  }, [filtered, groupBy, showDone]);
 
   // Quick add
   const [adding, setAdding] = useState(false);
@@ -196,11 +201,49 @@ export default function TaskWorkspace(props: Props) {
   const [newEnd, setNewEnd] = useState("");
   const [newPrio, setNewPrio] = useState("Medium");
   const [newCollabs, setNewCollabs] = useState<string[]>([]);
+  const [moreNew, setMoreNew] = useState(false);
+  const newTitleRef = useRef<HTMLInputElement>(null);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const filterRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!filterOpen) return;
+    const close = (e: MouseEvent) => !filterRef.current?.contains(e.target as Node) && setFilterOpen(false);
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, [filterOpen]);
   // Quick add from the top bar (+) opens the add form: /my-tasks?new=1
   useEffect(() => {
     if (search.get("new") === "1" && mode !== "archive") setAdding(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  // Asana-style "Add task…" line under each list section / board column:
+  // type a name, Enter. The task lands in that section.
+  const quickAdd = useCallback(
+    async (groupKey: string, title: string) => {
+      const t = title.trim();
+      if (!t) return;
+      const g = view === "board" ? "board" : groupBy;
+      try {
+        const created = await createTask({
+          title: t,
+          brandId: g === "brand" && groupKey !== "none" ? groupKey : props.fixedBrandId ?? null,
+          assigneeId: g === "assignee" && groupKey !== "none" ? groupKey : null,
+          priority: g === "priority" ? groupKey : "Medium",
+        });
+        setTasks((ts) => [created, ...ts]);
+        if (g === "board") {
+          const patch = dropPatch(created, groupKey as BoardKey);
+          if (patch) onUpdate(created.id, patch);
+        }
+        syncSoon();
+      } catch (err) {
+        flash(err instanceof Error ? err.message : "Couldn't add task");
+      }
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [view, groupBy, props.fixedBrandId, onUpdate, syncSoon],
+  );
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();
@@ -222,6 +265,7 @@ export default function TaskWorkspace(props: Props) {
         syncSoon();
         setNewTitle("");
         setNewCollabs([]);
+        setTimeout(() => newTitleRef.current?.focus(), 0);
         setNewStart("");
         setNewEnd("");
         flash(`${t.code} added`);
@@ -267,109 +311,162 @@ export default function TaskWorkspace(props: Props) {
           </div>
         </header>
 
-        {/* toolbar */}
-        <div data-tour="toolbar" className="scroll-thin flex items-center gap-2 overflow-x-auto border-b border-line px-4 py-2 md:flex-wrap md:overflow-visible md:px-6">
+        {/* toolbar — Asana-style: one primary action, everything else tucked into small buttons */}
+        <div data-tour="toolbar" className="flex items-center gap-2 border-b border-line px-4 py-2 md:px-6">
           {canCreate && (
             <button data-tour="add-task" className="btn-primary shrink-0" onClick={() => setAdding((a) => !a)}>
               <Plus className="h-3.5 w-3.5" /> Add task
             </button>
           )}
-          <div className="relative shrink-0">
-            <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-            <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Search" className="field-input w-36 py-1 pl-7 md:w-48" />
+          <div className="ml-auto flex shrink-0 items-center gap-1">
+            <div className="relative hidden sm:block">
+              <Search className="pointer-events-none absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+              <input value={q} onChange={(e) => setQ(e.target.value)} placeholder="Find in this list" className="w-40 rounded-md border border-transparent bg-transparent py-1 pl-7 pr-2 text-[13px] outline-none hover:border-line focus:w-52 focus:border-accent" />
+            </div>
+            <div ref={filterRef} className="relative">
+              <button onClick={() => setFilterOpen((o) => !o)} className={cn("btn-ghost gap-1.5 px-2 py-1 text-[13px]", activeFilters > 0 && "text-accent")}>
+                <SlidersHorizontal className="h-3.5 w-3.5" /> Filter{activeFilters > 0 ? ` (${activeFilters})` : ""}
+              </button>
+              {filterOpen && (
+                <div className="absolute right-0 top-full z-30 mt-1 w-64 space-y-2 rounded-lg border border-line bg-surface p-3 shadow-pop">
+                  {!props.fixedBrandId && (
+                    <label className="block text-[12px] text-muted">
+                      Brand / project
+                      <select value={brandF} onChange={(e) => setBrandF(e.target.value)} className="field-input mt-1 py-1">
+                        <option value="">All</option>
+                        {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  {viewer.seeAll && (
+                    <label className="block text-[12px] text-muted">
+                      Assignee
+                      <select value={personF} onChange={(e) => setPersonF(e.target.value)} className="field-input mt-1 py-1">
+                        <option value="">Everyone</option>
+                        <option value="none">Unassigned</option>
+                        {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                      </select>
+                    </label>
+                  )}
+                  <label className="block text-[12px] text-muted">
+                    Priority
+                    <select value={prioF} onChange={(e) => setPrioF(e.target.value)} className="field-input mt-1 py-1">
+                      <option value="">Any</option>
+                      {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+                    </select>
+                  </label>
+                  <label className="block text-[12px] text-muted sm:hidden">
+                    Find
+                    <input value={q} onChange={(e) => setQ(e.target.value)} className="field-input mt-1 py-1" />
+                  </label>
+                  {activeFilters > 0 && (
+                    <button className="text-[12px] text-accent hover:underline" onClick={() => { setBrandF(""); setPersonF(""); setPrioF(""); setQ(""); }}>
+                      Clear filters
+                    </button>
+                  )}
+                </div>
+              )}
+            </div>
+            {view === "list" && (
+              <label className="btn-ghost relative gap-1.5 px-2 py-1 text-[13px]">
+                <Rows3 className="h-3.5 w-3.5" />
+                <span className="hidden sm:inline">Group</span>
+                <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="absolute inset-0 cursor-pointer opacity-0" aria-label="Group by">
+                  <option value="board">Status</option>
+                  {!props.fixedBrandId && <option value="brand">Brand / project</option>}
+                  {viewer.seeAll && <option value="assignee">Assignee</option>}
+                  <option value="priority">Priority</option>
+                  <option value="none">No grouping</option>
+                </select>
+              </label>
+            )}
+            {mode !== "archive" && view !== "board" && (
+              <button
+                onClick={() => setShowDone((v) => !v)}
+                className={cn("btn-ghost gap-1.5 px-2 py-1 text-[13px]", showDone && "bg-canvas text-ink")}
+                title="Show completed tasks"
+              >
+                <CheckCircle2 className="h-3.5 w-3.5" /> <span className="hidden sm:inline">{showDone ? "Hide completed" : "Show completed"}</span>
+              </button>
+            )}
+            <span className="hidden whitespace-nowrap pl-1 text-[12px] text-muted md:inline">{(view === "board" ? matching : filtered).length} tasks</span>
           </div>
-          {!props.fixedBrandId && (
-            <select value={brandF} onChange={(e) => setBrandF(e.target.value)} className="field-input w-auto shrink-0 py-1">
-              <option value="">All brands</option>
-              {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-            </select>
-          )}
-          {viewer.seeAll && (
-            <select value={personF} onChange={(e) => setPersonF(e.target.value)} className="field-input w-auto shrink-0 py-1">
-              <option value="">Everyone</option>
-              <option value="none">Unassigned</option>
-              {people.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-            </select>
-          )}
-          <select value={prioF} onChange={(e) => setPrioF(e.target.value)} className="field-input w-auto shrink-0 py-1">
-            <option value="">Any priority</option>
-            {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
-          </select>
-          {view === "list" && (
-            <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="field-input w-auto shrink-0 py-1">
-              <option value="board">Group: Status</option>
-                            {!props.fixedBrandId && <option value="brand">Group: Brand</option>}
-              {viewer.seeAll && <option value="assignee">Group: Assignee</option>}
-              <option value="priority">Group: Priority</option>
-              <option value="none">No grouping</option>
-            </select>
-          )}
-          {mode !== "archive" && view !== "board" && (
-            <label className="ml-auto flex shrink-0 cursor-pointer items-center gap-1.5 whitespace-nowrap text-[13px] text-muted">
-              <input type="checkbox" checked={showDone} onChange={(e) => setShowDone(e.target.checked)} className="accent-[#5b3fd1]" />
-              Show delivered & closed
-            </label>
-          )}
-          <span className={cn("shrink-0 whitespace-nowrap text-[12px] text-muted", (mode === "archive" || view === "board") && "ml-auto")}>{(view === "board" ? matching : filtered).length} tasks</span>
         </div>
 
         {adding && canCreate && (
-          <form onSubmit={submitNew} className="flex flex-wrap items-center gap-2 border-b border-line bg-canvas px-4 py-2.5 md:px-6">
-            <input autoFocus value={newTitle} onChange={(e) => setNewTitle(e.target.value)} placeholder="Task name" className="field-input min-w-[200px] flex-1" />
-            {!props.fixedBrandId && (
-              <select value={newBrand} onChange={(e) => setNewBrand(e.target.value)} className="field-input w-auto">
-                <option value="">Brand</option>
-                {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
-              </select>
-            )}
-            {canAssign && (
-              <select value={newPerson} onChange={(e) => setNewPerson(e.target.value)} className="field-input w-auto">
-                <option value="">Assignee</option>
-                {people.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-              </select>
-            )}
-            <select value={newPrio} onChange={(e) => setNewPrio(e.target.value)} className="field-input w-auto">
-              {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
-            </select>
-            <label className="flex items-center gap-1 text-[12px] text-muted">
-              Start <input type="datetime-local" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="field-input w-auto" />
-            </label>
-            <label className="flex items-center gap-1 text-[12px] text-muted">
-              End <input type="datetime-local" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="field-input w-auto" />
-            </label>
-            <label className="flex items-center gap-1 text-[12px] text-muted">
-              Due <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto" />
-            </label>
-            {viewer.seeAll && (
-              <label className="flex items-center gap-1 text-[12px] text-muted">
-                Client <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto" />
+          <form onSubmit={submitNew} className="border-b border-line bg-canvas px-4 py-2.5 md:px-6">
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                ref={newTitleRef}
+                autoFocus
+                value={newTitle}
+                onChange={(e) => setNewTitle(e.target.value)}
+                onKeyDown={(e) => e.key === "Escape" && setAdding(false)}
+                placeholder="Write a task name, press Enter"
+                className="field-input min-w-[220px] flex-1"
+              />
+              <label className="flex items-center gap-1 text-[12px] text-muted" title="Due date">
+                <CalendarDays className="h-4 w-4" />
+                <input type="date" value={newDue} onChange={(e) => setNewDue(e.target.value)} className="field-input w-auto py-1" />
               </label>
+              {canAssign && (
+                <select value={newPerson} onChange={(e) => setNewPerson(e.target.value)} className="field-input w-auto py-1">
+                  <option value="">{viewer.seeAll ? "Assignee" : "Me"}</option>
+                  {people.filter((p) => p.active).map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </select>
+              )}
+              <button type="submit" className="btn-primary" disabled={!newTitle.trim()}>Add</button>
+              <button type="button" className="btn-ghost text-[12px]" onClick={() => setMoreNew((m) => !m)}>
+                {moreNew ? "Fewer options" : "More options"}
+              </button>
+              <button type="button" className="btn-ghost text-[12px]" onClick={() => setAdding(false)}>Cancel</button>
+            </div>
+            {moreNew && (
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                {!props.fixedBrandId && (
+                  <select value={newBrand} onChange={(e) => setNewBrand(e.target.value)} className="field-input w-auto py-1">
+                    <option value="">Brand / project</option>
+                    {brands.map((b) => <option key={b.id} value={b.id}>{b.name}</option>)}
+                  </select>
+                )}
+                <select value={newPrio} onChange={(e) => setNewPrio(e.target.value)} className="field-input w-auto py-1">
+                  {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+                </select>
+                <label className="flex items-center gap-1 text-[12px] text-muted">
+                  Start <input type="datetime-local" value={newStart} onChange={(e) => setNewStart(e.target.value)} className="field-input w-auto py-1" />
+                </label>
+                <label className="flex items-center gap-1 text-[12px] text-muted">
+                  End <input type="datetime-local" value={newEnd} onChange={(e) => setNewEnd(e.target.value)} className="field-input w-auto py-1" />
+                </label>
+                {viewer.seeAll && (
+                  <label className="flex items-center gap-1 text-[12px] text-muted">
+                    Client deadline <input type="date" value={newExtDue} onChange={(e) => setNewExtDue(e.target.value)} className="field-input w-auto py-1" />
+                  </label>
+                )}
+                <select
+                  value=""
+                  onChange={(e) => e.target.value && setNewCollabs((c) => [...new Set([...c, e.target.value])])}
+                  className="field-input w-auto py-1"
+                >
+                  <option value="">+ Collaborator</option>
+                  {people.filter((p) => p.active && p.id !== viewer.id && !newCollabs.includes(p.id)).map((p) => (
+                    <option key={p.id} value={p.id}>{p.name}</option>
+                  ))}
+                </select>
+                {newCollabs.map((id) => (
+                  <span key={id} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[12px]">
+                    {people.find((p) => p.id === id)?.name}
+                    <button type="button" className="text-muted hover:text-ink" onClick={() => setNewCollabs((c) => c.filter((x) => x !== id))}>×</button>
+                  </span>
+                ))}
+              </div>
             )}
-            <select
-              value=""
-              onChange={(e) => e.target.value && setNewCollabs((c) => [...new Set([...c, e.target.value])])}
-              className="field-input w-auto"
-            >
-              <option value="">+ Collaborator</option>
-              {people.filter((p) => p.active && p.id !== viewer.id && !newCollabs.includes(p.id)).map((p) => (
-                <option key={p.id} value={p.id}>{p.name}</option>
-              ))}
-            </select>
-            {newCollabs.map((id) => (
-              <span key={id} className="inline-flex items-center gap-1 rounded-full bg-surface px-2 py-0.5 text-[12px]">
-                {people.find((p) => p.id === id)?.name}
-                <button type="button" className="text-muted hover:text-ink" onClick={() => setNewCollabs((c) => c.filter((x) => x !== id))}>×</button>
-              </span>
-            ))}
-            {!canAssign && <span className="basis-full text-[11px] text-muted">The task is assigned to you. Collaborators can see it and comment.</span>}
-            <button type="submit" className="btn-primary">Add</button>
-            <button type="button" className="btn-ghost" onClick={() => setAdding(false)}>Cancel</button>
           </form>
         )}
 
         <div className="scroll-thin min-h-0 flex-1 overflow-auto px-3 pb-10 pt-1 md:px-6">
           {view === "list" && (
-            filtered.length === 0 ? (
+            filtered.length === 0 && groupBy !== "board" ? (
               <div className="py-20 text-center text-[13px] text-muted">
                 {mode === "mine" ? "Nothing on your plate right now. Click \"Add task\" to create one, then click the task to open it (comments are at the bottom)." : "No tasks match these filters."}
               </div>
@@ -397,6 +494,7 @@ export default function TaskWorkspace(props: Props) {
                 selectedId={selectedId}
                 onOpen={(id) => open(id)}
                 onUpdate={onUpdate}
+                onQuickAdd={canCreate && groupBy !== "none" ? quickAdd : undefined}
               />
               </div>
               </>
@@ -413,6 +511,7 @@ export default function TaskWorkspace(props: Props) {
                   const patch = dropPatch(t, to);
                   if (patch) onUpdate(t.id, patch);
                 }}
+                onQuickAdd={canCreate ? quickAdd : undefined}
               />
             </div>
           )}
