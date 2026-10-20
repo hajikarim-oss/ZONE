@@ -1,177 +1,150 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { createTask, addAttachment, createStorageDevice } from "@/lib/actions";
 import { PRIORITIES } from "@/lib/constants";
+import { sameKey } from "@/lib/feeds";
+import { onAssigned } from "@/lib/notify";
 
-// Integration endpoint for Zapier, Make, N8N, Slack, and Email-to-task extensions.
-// Authenticated via Authorization header (Bearer <key>), x-api-key header, or ?apiKey= query param.
+// Create a task from n8n, Zapier, Make, an email or a Slack message.
+// Auth: header  Authorization: Bearer <INTEGRATION_API_KEY>  (or x-api-key).
+// Set INTEGRATION_API_KEY in .env / Vercel to turn this on.
+
+const when = (v: unknown) => {
+  if (!v || typeof v !== "string") return null;
+  const d = new Date(v);
+  return isNaN(d.getTime()) ? null : d;
+};
+const str = (...vals: unknown[]) => {
+  for (const v of vals) if (typeof v === "string" && v.trim()) return v.trim();
+  return "";
+};
+
 export async function POST(req: NextRequest) {
+  const expected = process.env.INTEGRATION_API_KEY;
+  if (!expected) return NextResponse.json({ ok: false, error: "Integrations are off. Set INTEGRATION_API_KEY first." }, { status: 503 });
+  const given = req.headers.get("x-api-key") || req.headers.get("authorization")?.replace(/^Bearer\s+/i, "");
+  if (!sameKey(given, expected)) return NextResponse.json({ ok: false, error: "Invalid or missing API key" }, { status: 401 });
+
   try {
-    const apiKey =
-      req.headers.get("x-api-key") ||
-      req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
-      req.nextUrl.searchParams.get("apiKey");
+    const body = (await req.json().catch(() => ({}))) as Record<string, unknown>;
 
-    const expectedKey = process.env.INTEGRATION_API_KEY || process.env.NEXTAUTH_SECRET;
-    if (expectedKey && apiKey !== expectedKey) {
-      return NextResponse.json({ ok: false, error: "Unauthorized. Invalid or missing API key." }, { status: 401 });
+    // Title from the email subject / Slack message; "Fwd: Re:" prefixes removed
+    const rawTitle = str(body.title, body.subject, body.header, body.summary, body.text);
+    if (!rawTitle) return NextResponse.json({ ok: false, error: "title (or subject) is required" }, { status: 400 });
+    const title = rawTitle.replace(/^((re|fwd?|fw)\s*:\s*)+/i, "").trim().slice(0, 200);
+    const description = str(body.description, body.brief, body.body, body.context, body.notes).slice(0, 10_000);
+
+    // Brand by name or id (e.g. "Unseen Man")
+    const brandIn = str(body.brandName, body.brand, body.brandId);
+    const brand = brandIn
+      ? await prisma.brand.findFirst({
+          where: { OR: [{ id: brandIn }, { name: { equals: brandIn, mode: "insensitive" } }] },
+        })
+      : null;
+
+    // Assignee by email, name or id
+    const personIn = str(body.assigneeEmail, body.assignee, body.assigneeName, body.assigneeId);
+    const assignee = personIn
+      ? await prisma.user.findFirst({
+          where: { active: true, OR: [{ id: personIn }, { email: { equals: personIn, mode: "insensitive" } }, { name: { equals: personIn, mode: "insensitive" } }] },
+        })
+      : null;
+
+    // Storage by name (created if new)
+    const storageIn = str(body.storageName, body.storage);
+    let storageId: string | null = null;
+    if (storageIn) {
+      const s =
+        (await prisma.storage.findFirst({ where: { name: { equals: storageIn, mode: "insensitive" } } })) ??
+        (await prisma.storage.create({ data: { name: storageIn } }));
+      storageId = s.id;
     }
 
-    const body = await req.json().catch(() => ({}));
+    // Start / End (date + time), Due date, optional client deadline
+    const priority = (PRIORITIES as readonly string[]).includes(String(body.priority)) ? String(body.priority) : "Medium";
+    const codes = await prisma.project.findMany({ select: { code: true } });
+    const max = codes.reduce((m, r) => Math.max(m, Number(r.code.match(/^TBM-(\d+)/)?.[1] ?? 0)), 0);
+    const source = str(body.source) || "Integration";
 
-    // Auto-populate task header / title from email subject, Slack message text, or title
-    const rawTitle = body.title || body.subject || body.header || body.summary || body.text;
-    if (!rawTitle || typeof rawTitle !== "string") {
-      return NextResponse.json(
-        { ok: false, error: "Title or subject is required to create a task." },
-        { status: 400 },
-      );
-    }
-    // Clean up subject lines like "Fwd: [Brief] Video for Unseen Man" -> "Video for Unseen Man"
-    const cleanTitle = rawTitle.replace(/^(re|fwd|fw):\s*/i, "").trim().slice(0, 200);
-
-    // Auto-populate description / brief from email body or Slack context
-    const description = (body.description || body.brief || body.body || body.context || body.notes || "").trim();
-
-    // Match or find brand (e.g. "Unseen Man")
-    let brandId: string | null = null;
-    const brandInput = (body.brandName || body.brand || body.brandId || "").trim();
-    if (brandInput) {
-      const brand = await prisma.brand.findFirst({
-        where: {
-          OR: [
-            { id: brandInput },
-            { name: { equals: brandInput, mode: "insensitive" } },
-            { name: { contains: brandInput, mode: "insensitive" } },
-          ],
-        },
-      });
-      if (brand) brandId = brand.id;
-    }
-
-    // Match or find assignee by email or name
-    let assigneeId: string | null = null;
-    const assigneeInput = (body.assigneeEmail || body.assignee || body.assigneeId || body.assigneeName || "").trim();
-    if (assigneeInput) {
-      const user = await prisma.user.findFirst({
-        where: {
-          active: true,
-          OR: [
-            { id: assigneeInput },
-            { email: { equals: assigneeInput, mode: "insensitive" } },
-            { name: { equals: assigneeInput, mode: "insensitive" } },
-          ],
-        },
-      });
-      if (user) assigneeId = user.id;
-    }
-
-    // Match or create storage device if provided
-    let storageDeviceId: string | null = null;
-    const storageInput = (body.storageName || body.storage || body.storageDevice || "").trim();
-    if (storageInput) {
-      let storage = await prisma.storageDevice.findFirst({
-        where: { name: { equals: storageInput, mode: "insensitive" } },
-      });
-      if (!storage) {
-        storage = await prisma.storageDevice.create({ data: { name: storageInput } });
-      }
-      storageDeviceId = storage.id;
-    }
-
-    // Priority
-    const priority = PRIORITIES.includes(body.priority) ? body.priority : "Medium";
-
-    // Three dates: Start date, End date, Due date
-    const startDate = body.startDate ? new Date(body.startDate) : null;
-    const internalDeadline = (body.endDate || body.internalDeadline) ? new Date(body.endDate || body.internalDeadline) : null;
-    const externalDeadline = (body.dueDate || body.externalDeadline) ? new Date(body.dueDate || body.externalDeadline) : null;
-
-    // Generate unique code
-    const rows = await prisma.project.findMany({ select: { code: true } });
-    let max = 0;
-    for (const r of rows) {
-      const n = Number(r.code.match(/^TBM-(\d+)/)?.[1] ?? 0);
-      if (n > max) max = n;
-    }
-    const code = `TBM-${String(max + 1).padStart(3, "0")}`;
-
-    // Create the task
-    const project = await prisma.project.create({
+    const p = await prisma.project.create({
       data: {
-        code,
-        title: cleanTitle,
+        code: `TBM-${String(max + 1).padStart(3, "0")}`,
+        title,
         context: description || null,
-        brandId,
-        assigneeId,
-        storageDeviceId,
+        brandId: brand?.id ?? null,
+        assigneeId: assignee?.id ?? null,
+        storageId,
         priority,
-        startDate: startDate && !isNaN(startDate.getTime()) ? startDate : null,
-        internalDeadline: internalDeadline && !isNaN(internalDeadline.getTime()) ? internalDeadline : null,
-        externalDeadline: externalDeadline && !isNaN(externalDeadline.getTime()) ? externalDeadline : null,
+        startAt: when(body.startAt ?? body.startDate),
+        endAt: when(body.endAt ?? body.endDate),
+        internalDeadline: when(body.dueDate ?? body.due),
+        externalDeadline: when(body.clientDeadline),
         lastTeamUpdateAt: new Date(),
       },
-      include: {
-        brand: true,
-        assignee: true,
-        storageDevice: true,
-      },
+      include: { brand: true, assignee: true, storage: true },
     });
 
-    // Auto-attach Drive links or uploaded URLs if provided
-    const driveUrl = body.driveUrl || body.attachmentUrl || body.fileUrl || body.attachment;
-    if (driveUrl && typeof driveUrl === "string" && driveUrl.trim()) {
-      await prisma.attachment.create({
-        data: {
-          projectId: project.id,
-          url: driveUrl.trim(),
-          label: body.attachmentLabel || (driveUrl.includes("drive.google.com") ? "Google Drive Files" : "Attachment"),
-        },
+    // Optional link(s): Drive file, email permalink, Slack message link…
+    const links = [body.driveUrl, body.attachmentUrl, body.fileUrl, body.link, ...(Array.isArray(body.links) ? body.links : [])]
+      .filter((u): u is string => typeof u === "string" && /^https?:\/\//i.test(u.trim()))
+      .slice(0, 20);
+    if (links.length)
+      await prisma.attachment.createMany({
+        data: links.map((url) => ({
+          projectId: p.id,
+          url: url.trim(),
+          name: str(body.attachmentName) || (url.includes("drive.google.com") ? "Google Drive" : url.includes("slack.com") ? "Slack message" : url.includes("mail.google.com") ? "Email" : "Link"),
+          addedByName: source,
+        })),
       });
-    }
+
+    await prisma.activity.create({ data: { projectId: p.id, actorName: source, field: "Created", toValue: p.title } });
+    if (p.assignee) await onAssigned(p);
 
     return NextResponse.json({
       ok: true,
       task: {
-        id: project.id,
-        code: project.code,
-        title: project.title,
-        brandName: project.brand?.name ?? null,
-        assigneeName: project.assignee?.name ?? null,
-        storageName: project.storageDevice?.name ?? null,
-        priority: project.priority,
-        startDate: project.startDate?.toISOString() ?? null,
-        endDate: project.internalDeadline?.toISOString() ?? null,
-        dueDate: project.externalDeadline?.toISOString() ?? null,
+        id: p.id,
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? null,
+        assignee: p.assignee?.name ?? null,
+        storage: p.storage?.name ?? null,
+        priority: p.priority,
+        startAt: p.startAt?.toISOString() ?? null,
+        endAt: p.endAt?.toISOString() ?? null,
+        dueDate: p.internalDeadline?.toISOString() ?? null,
+        attachments: links.length,
+      },
+      unmatched: {
+        ...(brandIn && !brand ? { brand: brandIn } : {}),
+        ...(personIn && !assignee ? { assignee: personIn } : {}),
       },
     });
-  } catch (error: any) {
-    console.error("[integrations/task] Error creating task:", error);
-    return NextResponse.json({ ok: false, error: error.message || "Internal server error" }, { status: 500 });
+  } catch (e) {
+    console.error("[integrations/task]", e);
+    return NextResponse.json({ ok: false, error: "Couldn't create the task" }, { status: 500 });
   }
 }
 
-// GET endpoint to return integration docs / schema for Zapier/N8N
+// Field reference for setting up n8n / Zapier / Make
 export async function GET() {
   return NextResponse.json({
-    name: "TBM Task Integration Endpoint",
-    description: "Create tasks directly from Email, Slack, Zapier, Make, or N8N",
+    name: "TBM Post Prod Panel: create task",
     method: "POST",
-    headers: {
-      "Authorization": "Bearer <API_KEY>",
-      "Content-Type": "application/json",
-    },
-    payloadFields: {
-      title: "string (required) - Task name or email subject",
-      description: "string (optional) - Task brief / email body",
-      brandName: "string (optional) - Brand name e.g. Unseen Man",
-      assigneeEmail: "string (optional) - Teammate email to assign task",
-      storageName: "string (optional) - Storage device or drive name",
-      priority: "High | Medium | Low (default: Medium)",
-      startDate: "ISO date string (optional)",
-      endDate: "ISO date string (optional)",
-      dueDate: "ISO date string (optional)",
-      driveUrl: "string (optional) - Google Drive link or file URL",
+    headers: { Authorization: "Bearer <INTEGRATION_API_KEY>", "Content-Type": "application/json" },
+    fields: {
+      title: "required: task name (or 'subject' from an email, 'text' from Slack)",
+      description: "brief / email body",
+      brandName: "e.g. Unseen Man (must match a brand)",
+      assigneeEmail: "teammate's email (or assigneeName)",
+      priority: "High | Medium | Low",
+      startAt: "ISO date-time, e.g. 2026-10-21T10:00:00+05:30",
+      endAt: "ISO date-time",
+      dueDate: "ISO date, e.g. 2026-10-25",
+      clientDeadline: "ISO date (admins only see this)",
+      storageName: "hard drive / folder (created if new)",
+      driveUrl: "a link to attach (or 'links': [..])",
+      source: "shown in history, e.g. 'n8n', 'Gmail', 'Slack'",
     },
   });
 }

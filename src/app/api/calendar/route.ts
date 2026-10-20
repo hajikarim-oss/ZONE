@@ -1,98 +1,89 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
-import { isDone } from "@/lib/status";
 import { APP_URL } from "@/lib/mailer";
+import { verifyFeedKey } from "@/lib/feeds";
+import { myTasksFilter } from "@/lib/rbac";
+import { isDone } from "@/lib/status";
 
-// Formats a Date to iCalendar UTC string format: YYYYMMDDTHHMMSSZ
-function toICSDate(d: Date): string {
-  return d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
-}
+// Personal calendar feed (iCal) of someone's My tasks, for Google Calendar /
+// Outlook / Apple Calendar → "Subscribe from URL". The link is personal and
+// signed: /api/calendar?u=<userId>&k=<key> (shown on the My tasks page).
+// Tasks with Start / End times appear at those times; otherwise on the Due date.
 
-// Google Calendar iCal feed for tasks and deadlines
+const toICS = (d: Date) => d.toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+const toICSDay = (d: Date) => d.toISOString().slice(0, 10).replace(/-/g, "");
+const esc = (s: string) => s.replace(/\\/g, "\\\\").replace(/;/g, "\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+// iCal lines must be folded at 75 octets
+const fold = (line: string) => line.match(/.{1,73}/g)?.join("\r\n ") ?? line;
+
 export async function GET(req: NextRequest) {
-  try {
-    const userEmail = req.nextUrl.searchParams.get("email");
-    const brandId = req.nextUrl.searchParams.get("brandId");
+  const u = req.nextUrl.searchParams.get("u") ?? "";
+  const k = req.nextUrl.searchParams.get("k") ?? "";
+  if (!u || !verifyFeedKey(u, k)) return NextResponse.json({ ok: false, error: "Invalid calendar link" }, { status: 401 });
 
-    const where: any = { archived: false };
-    if (userEmail) {
-      const user = await prisma.user.findUnique({ where: { email: userEmail } });
-      if (user) {
-        where.OR = [
-          { assigneeId: user.id },
-          { createdById: user.id },
-          { collaborators: { some: { id: user.id } } },
-        ];
-      }
+  const user = await prisma.user.findUnique({ where: { id: u } });
+  if (!user || !user.active) return NextResponse.json({ ok: false, error: "Invalid calendar link" }, { status: 401 });
+  const seeAll = user.role === "ADMIN" || user.role === "MANAGER";
+
+  const tasks = await prisma.project.findMany({
+    where: { archived: false, ...myTasksFilter(user.id) },
+    include: { brand: true, assignee: true, subtasks: { where: { assigneeId: user.id, done: false } } },
+  });
+
+  const lines = [
+    "BEGIN:VCALENDAR",
+    "VERSION:2.0",
+    "PRODID:-//The Bored Monkey//Post Prod Panel//EN",
+    "CALSCALE:GREGORIAN",
+    "METHOD:PUBLISH",
+    `X-WR-CALNAME:${esc(`TBM tasks · ${user.name}`)}`,
+    "X-WR-TIMEZONE:Asia/Kolkata",
+    "REFRESH-INTERVAL;VALUE=DURATION:PT1H",
+  ];
+  const stamp = toICS(new Date());
+
+  for (const t of tasks) {
+    if (isDone(t)) continue;
+    const link = `${APP_URL}/${seeAll ? "projects" : "my-tasks"}?task=${t.id}`;
+    const desc = [
+      `${t.code} · ${t.title}`,
+      `Brand: ${t.brand?.name ?? "—"}`,
+      `Assignee: ${t.assignee?.name ?? "Unassigned"}`,
+      `Priority: ${t.priority}`,
+      `Edit status: ${t.editStatus}`,
+      t.internalDeadline ? `Due: ${t.internalDeadline.toISOString().slice(0, 10)}` : "",
+      seeAll && t.externalDeadline ? `Client deadline: ${t.externalDeadline.toISOString().slice(0, 10)}` : "",
+      t.context ? `\n${t.context}` : "",
+      `\nOpen: ${link}`,
+    ].filter(Boolean).join("\n");
+    const summary = `${t.title}${t.brand ? ` (${t.brand.name})` : ""}`;
+
+    if (t.startAt || t.endAt) {
+      const start = t.startAt ?? new Date(t.endAt!.getTime() - 3600_000);
+      const end = t.endAt && t.endAt > start ? t.endAt : new Date(start.getTime() + 3600_000);
+      lines.push("BEGIN:VEVENT", `UID:tbm-work-${t.id}@post-prod`, `DTSTAMP:${stamp}`, `DTSTART:${toICS(start)}`, `DTEND:${toICS(end)}`,
+        fold(`SUMMARY:${esc(summary)}`), fold(`DESCRIPTION:${esc(desc)}`), fold(`URL:${link}`), "END:VEVENT");
     }
-    if (brandId) {
-      where.brandId = brandId;
+    if (t.internalDeadline) {
+      const day = new Date(t.internalDeadline);
+      const next = new Date(day.getTime() + 86_400_000);
+      lines.push("BEGIN:VEVENT", `UID:tbm-due-${t.id}@post-prod`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${toICSDay(day)}`, `DTEND;VALUE=DATE:${toICSDay(next)}`,
+        fold(`SUMMARY:${esc(`Due: ${summary}`)}`), fold(`DESCRIPTION:${esc(desc)}`), fold(`URL:${link}`), "END:VEVENT");
     }
-
-    const tasks = await prisma.project.findMany({
-      where,
-      include: {
-        brand: true,
-        assignee: true,
-      },
-    });
-
-    const activeTasks = tasks.filter((t) => !isDone(t));
-
-    // Build iCalendar string
-    let ics = [
-      "BEGIN:VCALENDAR",
-      "VERSION:2.0",
-      "PRODID:-//The Bored Monkey//TBM Post Production//EN",
-      "CALSCALE:GREGORIAN",
-      "METHOD:PUBLISH",
-      "X-WR-CALNAME:TBM Post Production Tasks",
-      "X-WR-TIMEZONE:Asia/Kolkata",
-    ];
-
-    for (const t of activeTasks) {
-      const start = t.startDate || t.internalDeadline || t.createdAt;
-      const end = t.internalDeadline || t.externalDeadline || new Date(start.getTime() + 3600000);
-
-      const summary = `[${t.code}] ${t.title}${t.brand ? ` (${t.brand.name})` : ""}`;
-      const description = [
-        `Task: ${t.title}`,
-        `Brand: ${t.brand?.name ?? "None"}`,
-        `Assignee: ${t.assignee?.name ?? "Unassigned"}`,
-        `Priority: ${t.priority}`,
-        `Edit Status: ${t.editStatus}`,
-        t.context ? `Context: ${t.context}` : "",
-        `Link: ${APP_URL}/my-tasks?task=${t.id}`,
-      ]
-        .filter(Boolean)
-        .join("\\n");
-
-      ics.push(
-        "BEGIN:VEVENT",
-        `UID:tbm-${t.id}@theboredmonkey.com`,
-        `DTSTAMP:${toICSDate(new Date())}`,
-        `DTSTART:${toICSDate(start)}`,
-        `DTEND:${toICSDate(end)}`,
-        `SUMMARY:${summary}`,
-        `DESCRIPTION:${description}`,
-        `URL:${APP_URL}/my-tasks?task=${t.id}`,
-        "STATUS:CONFIRMED",
-        "END:VEVENT",
-      );
+    for (const s of t.subtasks) {
+      if (!s.dueDate) continue;
+      const next = new Date(s.dueDate.getTime() + 86_400_000);
+      lines.push("BEGIN:VEVENT", `UID:tbm-sub-${s.id}@post-prod`, `DTSTAMP:${stamp}`, `DTSTART;VALUE=DATE:${toICSDay(s.dueDate)}`, `DTEND;VALUE=DATE:${toICSDay(next)}`,
+        fold(`SUMMARY:${esc(`Subtask: ${s.title} · ${t.title}`)}`), fold(`URL:${link}`), "END:VEVENT");
     }
-
-    ics.push("END:VCALENDAR");
-
-    return new Response(ics.join("\r\n"), {
-      status: 200,
-      headers: {
-        "Content-Type": "text/calendar; charset=utf-8",
-        "Content-Disposition": 'inline; filename="tbm-tasks.ics"',
-        "Cache-Control": "no-cache, no-store, must-revalidate",
-      },
-    });
-  } catch (error: any) {
-    console.error("[calendar] Error generating feed:", error);
-    return NextResponse.json({ ok: false, error: error.message }, { status: 500 });
   }
+  lines.push("END:VCALENDAR");
+
+  return new Response(lines.join("\r\n"), {
+    headers: {
+      "Content-Type": "text/calendar; charset=utf-8",
+      "Content-Disposition": 'inline; filename="tbm-tasks.ics"',
+      "Cache-Control": "no-store",
+    },
+  });
 }

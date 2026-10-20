@@ -1,5 +1,7 @@
 import { Suspense } from "react";
+import CalendarLink from "@/components/tasks/CalendarLink";
 import TaskWorkspace from "@/components/tasks/TaskWorkspace";
+import { calendarFeedUrl } from "@/lib/feeds";
 import { requireTeamPage } from "@/lib/auth";
 import { loadWorkspace } from "@/lib/workspace";
 import { myTasksFilter } from "@/lib/rbac";
@@ -16,6 +18,7 @@ export default async function MyTasksPage() {
         subtitle={`Tasks assigned to you (or a subtask of yours), tasks you added, and tasks you collaborate on, ${me.name.split(" ")[0]}. Add your own with "Add task".`}
         mode="mine"
         defaultGroupBy="board"
+        headerExtra={<CalendarLink url={calendarFeedUrl(me.id)} />}
         {...data}
       />
     </Suspense>
