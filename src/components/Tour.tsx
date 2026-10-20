@@ -207,7 +207,7 @@ function buildSteps(role: string, first: string): Step[] {
       route: "/projects",
       body: (
         <>
-          <p>Give it a name, then choose the brand, assignee, priority, <b>team deadline</b> and <b>client deadline</b>. It gets the next code (TBM-…) automatically.</p>
+          <p>Give it a name, then choose the brand, assignee, priority, <b>due date</b> and <b>client deadline</b>. It gets the next code (TBM-…) automatically.</p>
           <p className="mt-2">The assignee gets a notification and an email straight away; collaborators you add are notified too. Add brief notes in <b>Context for the team</b> inside the task.</p>
         </>
       ),
@@ -216,7 +216,7 @@ function buildSteps(role: string, first: string): Step[] {
       title: "Two deadlines",
       body: (
         <>
-          <p><b>Team deadline</b>: when the work is due internally. Team members only ever see this one.</p>
+          <p><b>Due date</b>: when the work should be complete. Team members only ever see this one.</p>
           <p className="mt-2"><b>Client deadline</b>: the delivery date promised to the brand. Only admins, managers and the brand see it.</p>
           <p className="mt-2">Every time a deadline is pushed, the task counts it ("Deadline pushed ×2"). <b>Internal notes</b> in the task panel are also hidden from team members.</p>
         </>
@@ -292,7 +292,7 @@ function buildSteps(role: string, first: string): Step[] {
       body: (
         <>
           <p>Add a brand and it appears in every Brand dropdown straight away.</p>
-          <p className="mt-2"><b>Add client login</b> gives the brand's POC their own tracker: only their brand, in friendly wording ("Being edited", "Ready for your review"), with the revision round and delivery date. No team names, team deadlines or notes.</p>
+          <p className="mt-2"><b>Add client login</b> gives the brand's POC their own tracker: only their brand, in friendly wording ("Being edited", "Ready for your review"), with the revision round and delivery date. No team names, due dates or notes.</p>
         </>
       ),
     });

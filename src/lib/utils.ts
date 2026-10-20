@@ -53,3 +53,19 @@ export function relativeDue(d: string | null) {
   if (diff < 0) return { text: fmtDate(due), tone: "late" as const };
   return { text: fmtDate(due), tone: "ok" as const };
 }
+
+// <input type="datetime-local"> value, in the viewer's own time zone
+export function toInputDateTime(d: string | null | undefined) {
+  if (!d) return "";
+  const x = new Date(d);
+  if (isNaN(x.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${x.getFullYear()}-${pad(x.getMonth() + 1)}-${pad(x.getDate())}T${pad(x.getHours())}:${pad(x.getMinutes())}`;
+}
+
+// datetime-local value → ISO (keeps the viewer's time zone, e.g. IST)
+export function fromInputDateTime(v: string) {
+  if (!v) return null;
+  const x = new Date(v);
+  return isNaN(x.getTime()) ? null : x.toISOString();
+}

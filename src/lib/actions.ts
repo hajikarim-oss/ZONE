@@ -11,7 +11,7 @@ import {
   BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPARTMENTS, DEPTS, EDIT_STATUSES, FINAL_APPROVAL,
   PREPRO_STAGES, PRIORITIES, REVISION_ALERT_ROUND, ROLES, SCRIPT_STAGES, SHOOT_STATUSES,
 } from "@/lib/constants";
-import { forViewer, taskInclude, toAttachmentDTO, toTaskDTO, type AttachmentDTO, type TaskDTO } from "@/lib/dto";
+import { forViewer, taskInclude, toTaskDTO, type StorageDTO, type TaskDTO } from "@/lib/dto";
 import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert } from "@/lib/notify";
 import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
 import { runDailyAutomations, type DailyResult } from "@/lib/automations";
@@ -29,10 +29,9 @@ const ENUMS: Record<string, readonly string[]> = {
   deliveryStatus: DELIVERY_STATUSES,
 };
 const TEXT = new Set(["title", "type", "platform", "notes", "context"]);
-const DATES = new Set(["externalDeadline", "internalDeadline", "startDate"]);
-const REFS = new Set(["brandId", "assigneeId", "storageDeviceId"]);
+const DATES = new Set(["externalDeadline", "internalDeadline", "startAt", "endAt"]);
+const REFS = new Set(["brandId", "assigneeId", "storageId"]);
 const BOOLS = new Set(["onHold"]);
-const NUMS = new Set(["estimatedHours"]);
 
 // Run slow side work (history, notifications, emails) after the response is
 // sent, so the person clicking doesn't wait for it.
@@ -47,9 +46,39 @@ function later(label: string, fn: () => Promise<unknown>) {
 }
 
 // Who can see / edit a task, from a loaded row.
-function access(p: { assigneeId: string | null; createdById: string | null; collaborators: { id: string }[]; brandId?: string | null }): Access {
-  return { assigneeId: p.assigneeId, createdById: p.createdById, collaboratorIds: p.collaborators.map((c) => c.id), brandId: p.brandId };
+type AccessRow = {
+  assigneeId: string | null;
+  createdById: string | null;
+  brandId: string | null;
+  collaborators: { id: string }[];
+  subtasks: { assigneeId: string | null }[];
+};
+function access(p: AccessRow): Access {
+  return {
+    assigneeId: p.assigneeId,
+    createdById: p.createdById,
+    brandId: p.brandId,
+    collaboratorIds: p.collaborators.map((c) => c.id),
+    subtaskAssigneeIds: p.subtasks.map((x) => x.assigneeId).filter((x): x is string => !!x),
+  };
 }
+const accessSelect = {
+  assigneeId: true,
+  createdById: true,
+  brandId: true,
+  title: true,
+  collaborators: { select: { id: true } },
+  subtasks: { select: { assigneeId: true } },
+} as const;
+
+// Loads a task and checks the person can see it.
+async function viewTask(id: string) {
+  const [me, p] = await Promise.all([requireTeamUser(), prisma.project.findUnique({ where: { id }, select: accessSelect })]);
+  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
+  return { me, p };
+}
+
+const IST = (d: Date) => d.toLocaleString("en-IN", { timeZone: "Asia/Kolkata", day: "numeric", month: "short", year: "numeric", hour: "numeric", minute: "2-digit" });
 
 // Link to a task for a given person (team members open it from My tasks).
 function taskHref(role: string, id: string) {
@@ -60,10 +89,9 @@ const FIELD_LABEL: Record<string, string> = {
   title: "Title", type: "Type", platform: "Platform", dept: "Dept", priority: "Priority",
   briefStage: "Brief", scriptStage: "Concept / script", preProStage: "Pre-pro", shootStatus: "Shoot",
   editStatus: "Edit status", revisionRound: "Revision round", clientReview: "Client review",
-  finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Context",
-  startDate: "Start date", externalDeadline: "Due date", internalDeadline: "End date",
-  brandId: "Brand", assigneeId: "Assignee", storageDeviceId: "Storage",
-  onHold: "On hold", estimatedHours: "Estimated hours",
+  finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Description",
+  externalDeadline: "External deadline", internalDeadline: "Due date", brandId: "Brand", assigneeId: "Assignee",
+  onHold: "On hold", startAt: "Start", endAt: "End", storageId: "Storage",
 };
 
 function coerce(field: string, raw: unknown): unknown {
@@ -90,18 +118,12 @@ function coerce(field: string, raw: unknown): unknown {
   }
   if (REFS.has(field)) return raw ? String(raw) : null;
   if (BOOLS.has(field)) return raw === true || raw === "true";
-  if (NUMS.has(field)) {
-    if (!raw && raw !== 0) return null;
-    const n = Number(raw);
-    if (isNaN(n) || n < 0) throw new Error(`Invalid value for ${FIELD_LABEL[field]}`);
-    return n;
-  }
   throw new Error(`Unknown field ${field}`);
 }
 
 function show(v: unknown, field: string) {
   if (v == null || v === "") return "—";
-  if (v instanceof Date) return v.toISOString().slice(0, 10);
+  if (v instanceof Date) return field === "startAt" || field === "endAt" ? IST(v) : v.toISOString().slice(0, 10);
   if (typeof v === "boolean") return v ? "Yes" : "No";
   return String(v).slice(0, 200) + (field === "notes" && String(v).length > 200 ? "…" : "");
 }
@@ -123,17 +145,6 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
 
   // Auto-fills carried over from the Apps Script
   if (typeof data.editStatus === "string") {
-    // If moving to In Progress or Revision, take off hold and uncomplete so board syncs
-    if (data.editStatus === "In Progress" || data.editStatus.includes("Revision")) {
-      if (before.onHold && data.onHold === undefined) data.onHold = false;
-      if (
-        (before.deliveryStatus === "Files Sent" || before.deliveryStatus === "Project Closed" || before.deliveryStatus === "Invoice Raised") &&
-        data.deliveryStatus === undefined
-      ) {
-        data.deliveryStatus = "Not Started";
-        data.closedAt = null;
-      }
-    }
     const m = (data.editStatus as string).match(/^External Revision R(\d)/);
     if (m && data.revisionRound === undefined) data.revisionRound = Math.max(before.revisionRound, Number(m[1]));
     if (data.editStatus === "Final Approved" && before.finalApproval !== "Approved" && data.finalApproval === undefined)
@@ -165,7 +176,7 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
     const names = async (f: string, v: unknown) => {
       if (f === "brandId" && v) return (await prisma.brand.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "assigneeId" && v) return (await prisma.user.findUnique({ where: { id: String(v) } }))?.name ?? "—";
-      if (f === "storageDeviceId" && v) return (await prisma.storageDevice.findUnique({ where: { id: String(v) } }))?.name ?? "—";
+      if (f === "storageId" && v) return (await prisma.storage.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       return show(v, f);
     };
     await prisma.activity.createMany({
@@ -207,14 +218,16 @@ export async function createTask(input: {
   title: string;
   brandId?: string | null;
   assigneeId?: string | null;
-  startDate?: string | null;
   internalDeadline?: string | null;
   externalDeadline?: string | null;
+  startAt?: string | null;
+  endAt?: string | null;
+  storageId?: string | null;
+  context?: string | null;
   priority?: string;
   type?: string | null;
   platform?: string | null;
   collaboratorIds?: string[];
-  parentId?: string | null;
 }): Promise<TaskDTO> {
   const me = await requireTeamUser();
   if (!canCreateProjects(me)) throw new Error("You can't add tasks");
@@ -222,22 +235,29 @@ export async function createTask(input: {
   if (!title) throw new Error("Give the task a name");
   const seeAll = canSeeAll(me);
   const collabIds = [...new Set((input.collaboratorIds ?? []).filter(Boolean))];
+  // Team members assign tasks to themselves, except inside a brand workspace
+  // they belong to, where they can assign anyone (like an Asana project).
+  const inWorkspace = !!input.brandId && me.brandIds.includes(input.brandId);
+  const assigneeId = seeAll || inWorkspace ? input.assigneeId || (seeAll ? null : me.id) : me.id;
+  const when = (v?: string | null) => (v && !isNaN(new Date(v).getTime()) ? new Date(v) : null);
   const p = await prisma.project.create({
     data: {
       code: await nextCode(),
       title,
       brandId: input.brandId || null,
-      // Assigned to chosen teammate, or defaults to creator (or null for admins/managers)
-      assigneeId: input.assigneeId || (seeAll ? null : me.id),
+      // Team members add tasks for themselves (like Asana's My tasks)
+      assigneeId,
       createdById: me.id,
       collaborators: collabIds.length ? { connect: collabIds.map((id) => ({ id })) } : undefined,
       priority: input.priority && PRIORITIES.includes(input.priority as any) ? input.priority : "Medium",
       type: input.type || null,
       platform: input.platform || null,
-      startDate: input.startDate ? new Date(input.startDate) : null,
-      internalDeadline: input.internalDeadline ? new Date(input.internalDeadline) : null,
+      internalDeadline: when(input.internalDeadline),
+      startAt: when(input.startAt),
+      endAt: when(input.endAt),
+      storageId: input.storageId || null,
+      context: input.context?.trim() || null,
       externalDeadline: seeAll && input.externalDeadline ? new Date(input.externalDeadline) : null,
-      parentId: input.parentId || null,
       lastTeamUpdateAt: new Date(),
     },
     include: taskInclude,
@@ -314,31 +334,173 @@ export async function deleteTask(id: string) {
 export type UpdateDTO = { id: string; authorId: string | null; authorName: string; body: string; createdAt: string };
 export type ActivityDTO = { id: string; actorName: string; field: string; fromValue: string | null; toValue: string | null; createdAt: string };
 
-export async function getTaskThread(id: string): Promise<{ updates: UpdateDTO[]; activity: ActivityDTO[] }> {
-  const [me, p, updates, activity] = await Promise.all([
+export type SubtaskDTO = { id: string; title: string; assigneeId: string | null; dueDate: string | null; done: boolean };
+export type AttachmentDTO = { id: string; name: string; url: string; mimeType: string | null; iconUrl: string | null; addedByName: string; createdAt: string };
+type Thread = { updates: UpdateDTO[]; activity: ActivityDTO[]; subtasks: SubtaskDTO[]; attachments: AttachmentDTO[] };
+
+const subtaskDTO = (x: { id: string; title: string; assigneeId: string | null; dueDate: Date | null; done: boolean }): SubtaskDTO => ({
+  id: x.id, title: x.title, assigneeId: x.assigneeId, dueDate: x.dueDate?.toISOString() ?? null, done: x.done,
+});
+const attachmentDTO = (a: { id: string; name: string; url: string; mimeType: string | null; iconUrl: string | null; addedByName: string; createdAt: Date }): AttachmentDTO => ({
+  ...a, createdAt: a.createdAt.toISOString(),
+});
+
+export async function getTaskThread(id: string): Promise<Thread> {
+  const [me, p, updates, activity, subtasks, attachments] = await Promise.all([
     requireTeamUser(),
-    prisma.project.findUnique({ where: { id }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } }),
+    prisma.project.findUnique({ where: { id }, select: accessSelect }),
     prisma.update.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" } }),
     prisma.activity.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" }, take: 50 }),
+    prisma.subtask.findMany({ where: { projectId: id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] }),
+    prisma.attachment.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" } }),
   ]);
   if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
   return {
     updates: updates.map((u) => ({ id: u.id, authorId: u.authorId, authorName: u.authorName, body: u.body, createdAt: u.createdAt.toISOString() })),
     // Team members don't see client-deadline changes in the history either
     activity: activity
-      .filter((a) => canSeeAll(me) || a.field !== "Due date")
+      .filter((a) => canSeeAll(me) || a.field !== "External deadline")
       .map((a) => ({ ...a, createdAt: a.createdAt.toISOString() })),
+    subtasks: subtasks.map(subtaskDTO),
+    attachments: attachments.map(attachmentDTO),
   };
 }
 
-export async function getSubtasks(parentId: string): Promise<TaskDTO[]> {
-  const me = await requireTeamUser();
-  const rows = await prisma.project.findMany({
-    where: { parentId },
-    include: taskInclude,
-    orderBy: { createdAt: "asc" },
+// ---------- Subtasks ----------
+export async function addSubtask(projectId: string, input: { title: string; assigneeId?: string | null; dueDate?: string | null }): Promise<SubtaskDTO> {
+  const { me, p } = await viewTask(projectId);
+  const title = input.title?.trim();
+  if (!title) throw new Error("Give the subtask a name");
+  const count = await prisma.subtask.count({ where: { projectId } });
+  const st = await prisma.subtask.create({
+    data: {
+      projectId,
+      title,
+      assigneeId: input.assigneeId || null,
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      position: count,
+    },
   });
-  return rows.map((r) => forViewer(toTaskDTO(r), canSeeAll(me)));
+  later("subtask added", async () => {
+    await prisma.activity.create({ data: { projectId, actorName: me.name, field: "Subtask", toValue: `Added "${title}"` } });
+    if (st.assigneeId && st.assigneeId !== me.id) await notifySubtask(st.assigneeId, me.name, title, p.title, projectId);
+  });
+  return subtaskDTO(st);
+}
+
+async function notifySubtask(userId: string, by: string, title: string, taskTitle: string, projectId: string) {
+  const u = await prisma.user.findUnique({ where: { id: userId } });
+  if (!u || !u.active) return;
+  const href = taskHref(u.role, projectId);
+  await notify(u.id, `${by} gave you a subtask: ${title}`, `On ${taskTitle}`, href);
+  await sendMail(
+    u.email,
+    `☑️ New subtask — ${title}`,
+    emailHtml({ heading: "You have a new subtask", intro: `${by} assigned you "${title}" on ${taskTitle}.`, cta: { label: "Open task", href: `${APP_URL}${href}` } }),
+  );
+}
+
+export async function updateSubtask(
+  id: string,
+  patch: { title?: string; assigneeId?: string | null; dueDate?: string | null; done?: boolean },
+): Promise<SubtaskDTO> {
+  const before = await prisma.subtask.findUnique({ where: { id } });
+  if (!before) throw new Error("Subtask not found");
+  const { me, p } = await viewTask(before.projectId);
+  const data: Record<string, unknown> = {};
+  if (patch.title !== undefined) {
+    if (!patch.title.trim()) throw new Error("Subtask name can't be empty");
+    data.title = patch.title.trim();
+  }
+  if (patch.assigneeId !== undefined) data.assigneeId = patch.assigneeId || null;
+  if (patch.dueDate !== undefined) data.dueDate = patch.dueDate ? new Date(patch.dueDate) : null;
+  if (patch.done !== undefined) data.done = !!patch.done;
+  const st = await prisma.subtask.update({ where: { id }, data });
+  later("subtask updated", async () => {
+    if (patch.done !== undefined && patch.done !== before.done)
+      await prisma.activity.create({ data: { projectId: st.projectId, actorName: me.name, field: "Subtask", toValue: `${st.done ? "Completed" : "Reopened"} "${st.title}"` } });
+    if (st.assigneeId && st.assigneeId !== before.assigneeId && st.assigneeId !== me.id)
+      await notifySubtask(st.assigneeId, me.name, st.title, p.title, st.projectId);
+  });
+  return subtaskDTO(st);
+}
+
+export async function deleteSubtask(id: string) {
+  const st = await prisma.subtask.findUnique({ where: { id } });
+  if (!st) return;
+  const { me } = await viewTask(st.projectId);
+  await prisma.subtask.delete({ where: { id } });
+  later("subtask deleted", () =>
+    prisma.activity.create({ data: { projectId: st.projectId, actorName: me.name, field: "Subtask", toValue: `Removed "${st.title}"` } }),
+  );
+}
+
+// ---------- Attachments (Google Drive files or any link) ----------
+export async function addAttachments(
+  projectId: string,
+  files: { name: string; url: string; mimeType?: string | null; iconUrl?: string | null }[],
+): Promise<AttachmentDTO[]> {
+  const { me } = await viewTask(projectId);
+  const clean = files
+    .map((f) => ({ name: (f.name || f.url).trim().slice(0, 200), url: f.url.trim(), mimeType: f.mimeType ?? null, iconUrl: f.iconUrl ?? null }))
+    .filter((f) => /^https?:\/\//i.test(f.url));
+  if (!clean.length) throw new Error("Paste a link that starts with https://");
+  const rows = await prisma.$transaction(
+    clean.map((f) => prisma.attachment.create({ data: { projectId, ...f, addedByName: me.name } })),
+  );
+  later("attachments added", () =>
+    prisma.activity.create({ data: { projectId, actorName: me.name, field: "Attachment", toValue: `Added ${rows.map((r) => r.name).join(", ")}`.slice(0, 200) } }),
+  );
+  return rows.map(attachmentDTO);
+}
+
+export async function deleteAttachment(id: string) {
+  const a = await prisma.attachment.findUnique({ where: { id } });
+  if (!a) return;
+  const { me } = await viewTask(a.projectId);
+  await prisma.attachment.delete({ where: { id } });
+  later("attachment removed", () =>
+    prisma.activity.create({ data: { projectId: a.projectId, actorName: me.name, field: "Attachment", toValue: `Removed ${a.name}` } }),
+  );
+}
+
+// ---------- Storage names (hard drives / folders) ----------
+export async function createStorage(name: string): Promise<StorageDTO> {
+  await requireTeamUser();
+  const n = name.trim();
+  if (!n) throw new Error("Give the storage a name");
+  const existing = await prisma.storage.findFirst({ where: { name: { equals: n, mode: "insensitive" } } });
+  if (existing) return { id: existing.id, name: existing.name };
+  const s = await prisma.storage.create({ data: { name: n } });
+  return { id: s.id, name: s.name };
+}
+
+export async function deleteStorage(id: string) {
+  const me = await requireTeamUser();
+  if (!isAdmin(me)) throw new Error("Only admins can remove storage names");
+  await prisma.storage.delete({ where: { id } });
+  revalidatePath("/brands");
+}
+
+// ---------- Brand workspace members ----------
+export async function addBrandMember(brandId: string, userId: string) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me) && !me.brandIds.includes(brandId)) throw new Error("Only workspace members or admins can add people");
+  const [u, brand] = await Promise.all([prisma.user.findUnique({ where: { id: userId } }), prisma.brand.findUnique({ where: { id: brandId } })]);
+  if (!u || !u.active || !brand) throw new Error("Not found");
+  await prisma.brand.update({ where: { id: brandId }, data: { members: { connect: { id: userId } } } });
+  later("workspace member added", async () => {
+    if (u.id === me.id) return;
+    await notify(u.id, `${me.name} added you to the ${brand.name} workspace`, "You can now see all its tasks", `/brands/${brandId}`);
+  });
+  revalidatePath("/", "layout");
+}
+
+export async function removeBrandMember(brandId: string, userId: string) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me) && userId !== me.id) throw new Error("Only admins and managers can remove other people");
+  await prisma.brand.update({ where: { id: brandId }, data: { members: { disconnect: { id: userId } } } });
+  revalidatePath("/", "layout");
 }
 
 // Comments (Asana-style). Everyone on the task is notified; @Name mentions
@@ -412,71 +574,6 @@ export async function markAllNotificationsRead() {
   const me = await requireTeamUser();
   await prisma.notification.updateMany({ where: { userId: me.id, read: false }, data: { read: true } });
   revalidatePath("/", "layout");
-}
-
-// ───────────────────────── Attachments ─────────────────────────
-
-export async function getAttachments(projectId: string): Promise<AttachmentDTO[]> {
-  const [me, p] = await Promise.all([
-    requireTeamUser(),
-    prisma.project.findUnique({ where: { id: projectId }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } }),
-  ]);
-  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
-  const rows = await prisma.attachment.findMany({ where: { projectId }, orderBy: { createdAt: "asc" } });
-  return rows.map(toAttachmentDTO);
-}
-
-export async function addAttachment(projectId: string, url: string, label?: string): Promise<AttachmentDTO> {
-  const trimUrl = url.trim();
-  if (!trimUrl) throw new Error("URL is required");
-  const [me, p] = await Promise.all([
-    requireTeamUser(),
-    prisma.project.findUnique({ where: { id: projectId }, select: { assigneeId: true, createdById: true, collaborators: { select: { id: true } } } }),
-  ]);
-  if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
-  const a = await prisma.attachment.create({
-    data: { projectId, addedById: me.id, url: trimUrl, label: label?.trim() || null },
-  });
-  later("attachment history", () =>
-    prisma.activity.create({ data: { projectId, actorName: me.name, field: "Attachment", toValue: `Added: ${label?.trim() || trimUrl.slice(0, 60)}` } }),
-  );
-  return toAttachmentDTO(a);
-}
-
-export async function deleteAttachment(id: string) {
-  const me = await requireTeamUser();
-  const a = await prisma.attachment.findUnique({ where: { id } });
-  if (!a) return;
-  // Can delete your own; admins/managers can delete any
-  if (a.addedById !== me.id && !canSeeAll(me)) throw new Error("You can only remove your own attachments");
-  await prisma.attachment.delete({ where: { id } });
-}
-
-// ───────────────────────── Storage Devices ─────────────────────────
-
-export async function listStorageDevices(): Promise<{ id: string; name: string }[]> {
-  await requireTeamUser();
-  const devices = await prisma.storageDevice.findMany({ orderBy: { name: "asc" } });
-  return devices.map((d) => ({ id: d.id, name: d.name }));
-}
-
-export async function createStorageDevice(name: string): Promise<{ id: string; name: string }> {
-  const me = await requireTeamUser();
-  const trimmed = name.trim();
-  if (!trimmed) throw new Error("Storage device name is required");
-  if (await prisma.storageDevice.findFirst({ where: { name: { equals: trimmed, mode: "insensitive" } } }))
-    throw new Error("A device with that name already exists");
-  const d = await prisma.storageDevice.create({ data: { name: trimmed } });
-  later("storage device created", () =>
-    prisma.activity.create({ data: { projectId: "system", actorName: me.name, field: "Storage device", toValue: `Created: ${trimmed}` } }).catch(() => {}),
-  );
-  return { id: d.id, name: d.name };
-}
-
-export async function deleteStorageDevice(id: string) {
-  const me = await requireTeamUser();
-  if (!isAdmin(me)) throw new Error("Only admins can remove storage devices");
-  await prisma.storageDevice.delete({ where: { id } });
 }
 
 // ───────────────────────── Team (TEAM REGISTRY) ─────────────────────────

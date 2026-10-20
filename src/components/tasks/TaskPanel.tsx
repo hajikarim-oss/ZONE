@@ -1,37 +1,31 @@
 "use client";
 
-import { Archive, ArchiveRestore, Clipboard, ExternalLink, MessageSquare, Paperclip, PauseCircle, Plus, Send, Trash2, UserPlus, X } from "lucide-react";
+import { Archive, ArchiveRestore, MessageSquare, Send, Trash2, UserPlus, X } from "lucide-react";
 import { useEffect, useRef, useState, useTransition } from "react";
 import Avatar from "@/components/Avatar";
+import { addCollaborator, addUpdate, deleteTask, deleteUpdate, getTaskThread, removeCollaborator, setArchived, type ActivityDTO, type AttachmentDTO, type SubtaskDTO, type UpdateDTO } from "@/lib/actions";
 import {
-  addAttachment, addCollaborator, addUpdate, createStorageDevice, createTask,
-  deleteAttachment, deleteTask, deleteUpdate, getAttachments, getSubtasks, getTaskThread,
-  listStorageDevices, removeCollaborator, setArchived,
-  type ActivityDTO, type UpdateDTO,
-} from "@/lib/actions";
-import {
-  BRIEF_STAGES, DEPTS, EDIT_STATUSES, PLATFORMS,
+  BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPTS, EDIT_STATUSES, FINAL_APPROVAL, PLATFORMS,
   PREPRO_STAGES, PRIORITIES, REVISION_ROUNDS, SCRIPT_STAGES, SHOOT_STATUSES, TYPES,
 } from "@/lib/constants";
-import { BOARD_COLUMNS, boardColumn, boardStatusPatch, type BoardKey } from "@/lib/status";
-import type { AttachmentDTO, BrandDTO, PersonDTO, StorageDeviceDTO, TaskDTO } from "@/lib/dto";
+import type { BrandDTO, PersonDTO, StorageDTO, TaskDTO } from "@/lib/dto";
 import { canEditField, canManageCollaborators } from "@/lib/rbac";
-import { cn, fmtDate, fmtDateTime, toInputDate } from "@/lib/utils";
-import { CellSelect, DelayBadge, opts, StagePill } from "./bits";
+import { cn, fmtDate, fmtDateTime, fromInputDateTime, toInputDate, toInputDateTime } from "@/lib/utils";
+import { CellSelect, DelayBadge, opts, StagePill, StatusSelect } from "./bits";
+import { Attachments, StoragePicker, Subtasks } from "./TaskExtras";
 
 type Props = {
   task: TaskDTO;
   people: PersonDTO[];
   brands: BrandDTO[];
-  viewer: { id: string; role: string; seeAll: boolean; admin: boolean };
+  storages: StorageDTO[];
+  onStorageCreated: (s: StorageDTO) => void;
+  viewer: { id: string; role: string; seeAll: boolean; admin: boolean; brandIds?: string[] };
   onClose: () => void;
-  onOpen?: (id: string) => void;
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
   onRemoved: (id: string) => void;
   onReplace: (task: TaskDTO) => void;
 };
-
-const BOARD_STATUS_OPTS = BOARD_COLUMNS.map((c) => ({ value: c.key, label: c.label }));
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
@@ -73,48 +67,14 @@ function RichText({ text, names = [] }: { text: string; names?: string[] }) {
   );
 }
 
-function isDriveLink(url: string) {
-  return /drive\.google\.com|docs\.google\.com/i.test(url);
-}
-
-function AttachmentItem({ a, canDelete, onDelete }: { a: AttachmentDTO; canDelete: boolean; onDelete: () => void }) {
-  const isGDrive = isDriveLink(a.url);
-  const display = a.label || (a.url.length > 55 ? a.url.slice(0, 52) + "…" : a.url);
-  return (
-    <div className="group flex items-center gap-2 rounded-md border border-line bg-canvas px-3 py-2 text-[13px]">
-      {isGDrive ? (
-        <svg className="h-4 w-4 shrink-0 text-[#4285F4]" viewBox="0 0 87.3 78" fill="currentColor">
-          <path d="M6.6 66.85l3.85 6.65c.8 1.4 1.95 2.5 3.3 3.3l13.75-23.8H0c0 1.55.4 3.1 1.2 4.5z" fill="#0066DA" />
-          <path d="M43.65 25L29.9 1.2C28.55 2 27.4 3.1 26.6 4.5L1.2 48.4C.4 49.8 0 51.35 0 52.9h27.5z" fill="#00AC47" />
-          <path d="M73.55 76.8c1.35-.8 2.5-1.9 3.3-3.3l1.6-2.75 7.65-13.25c.8-1.4 1.2-2.95 1.2-4.5H59.8l5.85 11.5z" fill="#EA4335" />
-          <path d="M43.65 25L57.4 1.2C56.05.4 54.5 0 52.9 0H34.4c-1.6 0-3.15.45-4.5 1.2z" fill="#00832D" />
-          <path d="M59.8 52.9h27.5c0-1.55-.4-3.1-1.2-4.5L60.7 4.5C59.9 3.1 58.75 2 57.4 1.2L43.65 25z" fill="#2684FC" />
-          <path d="M43.65 25L27.5 52.9h32.3L43.65 25z" fill="#FFBA00" />
-        </svg>
-      ) : (
-        <Paperclip className="h-4 w-4 shrink-0 text-muted" />
-      )}
-      <a href={a.url} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-accent hover:underline">
-        {display}
-      </a>
-      <span className="shrink-0 text-[11px] text-muted">{fmtDate(a.createdAt)}</span>
-      {canDelete && (
-        <button
-          onClick={onDelete}
-          className="shrink-0 text-muted opacity-0 transition hover:text-rose-600 group-hover:opacity-100"
-          title="Remove"
-        >
-          <X className="h-3.5 w-3.5" />
-        </button>
-      )}
-    </div>
-  );
-}
-
-export default function TaskPanel({ task: t, people, brands, viewer, onClose, onOpen, onUpdate, onRemoved, onReplace }: Props) {
+export default function TaskPanel({ task: t, people, brands, storages, onStorageCreated, viewer, onClose, onUpdate, onRemoved, onReplace }: Props) {
   const { seeAll, admin, id: viewerId } = viewer;
   const [updates, setUpdates] = useState<UpdateDTO[] | null>(null);
   const [activity, setActivity] = useState<ActivityDTO[]>([]);
+  const [subtasks, setSubtasksRaw] = useState<SubtaskDTO[] | null>(null);
+  const [attachments, setAttachmentsRaw] = useState<AttachmentDTO[] | null>(null);
+  const setSubtasks = (fn: (x: SubtaskDTO[]) => SubtaskDTO[]) => setSubtasksRaw((x) => fn(x ?? []));
+  const setAttachments = (fn: (x: AttachmentDTO[]) => AttachmentDTO[]) => setAttachmentsRaw((x) => fn(x ?? []));
   const [tab, setTab] = useState<"updates" | "activity">("updates");
   const [mentionQ, setMentionQ] = useState<string | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -127,29 +87,14 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   const [context, setContext] = useState(t.context ?? "");
   const threadEnd = useRef<HTMLDivElement>(null);
 
-  // Attachments
-  const [attachments, setAttachments] = useState<AttachmentDTO[] | null>(null);
-  const [attachUrl, setAttachUrl] = useState("");
-  const [attachLabel, setAttachLabel] = useState("");
-  const [showAttachForm, setShowAttachForm] = useState(false);
-
-  // Storage devices
-  const [storageDevices, setStorageDevices] = useState<StorageDeviceDTO[]>([]);
-  const [newDeviceName, setNewDeviceName] = useState("");
-  const [showNewDevice, setShowNewDevice] = useState(false);
-
-  // Subtasks
-  const [subtasks, setSubtasks] = useState<TaskDTO[] | null>(null);
-  const [showSubtaskForm, setShowSubtaskForm] = useState(false);
-  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
-
   useEffect(() => {
     setTitle(t.title);
     setNotes(t.notes ?? "");
     setContext(t.context ?? "");
   }, [t.id, t.title, t.notes, t.context]);
 
-  // Load comments + history when a task opens
+  // Load comments + history when a task opens ("Loading…" only then). After an
+  // edit, refresh quietly a moment later so the history catches up.
   const openedId = useRef<string | null>(null);
   useEffect(() => {
     let live = true;
@@ -157,8 +102,8 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
     openedId.current = t.id;
     if (first) {
       setUpdates(null);
-      setAttachments(null);
-      setSubtasks(null);
+      setSubtasksRaw(null);
+      setAttachmentsRaw(null);
     }
     const timer = setTimeout(
       () =>
@@ -167,16 +112,12 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
             if (!live) return;
             setUpdates((cur) => [...r.updates, ...(cur ?? []).filter((u) => u.id.startsWith("tmp-"))]);
             setActivity(r.activity);
+            setSubtasksRaw((cur) => [...r.subtasks, ...(cur ?? []).filter((x) => x.id.startsWith("tmp-"))]);
+            setAttachmentsRaw(r.attachments);
           })
           .catch(() => live && first && setUpdates([])),
       first ? 0 : 1200,
     );
-    // Load attachments
-    getAttachments(t.id).then((a) => { if (live) setAttachments(a); }).catch(() => { if (live) setAttachments([]); });
-    // Load subtasks
-    getSubtasks(t.id).then((subs) => { if (live) setSubtasks(subs); }).catch(() => { if (live) setSubtasks([]); });
-    // Load storage devices
-    listStorageDevices().then((d) => { if (live) setStorageDevices(d); }).catch(() => {});
     return () => {
       live = false;
       clearTimeout(timer);
@@ -189,6 +130,20 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
     window.addEventListener("keydown", h);
     return () => window.removeEventListener("keydown", h);
   }, [onClose]);
+
+  // Keep the counts shown in the list / board in step with the panel.
+  useEffect(() => {
+    if (!subtasks || !attachments) return;
+    const real = subtasks.filter((x) => !x.id.startsWith("tmp-"));
+    const next = {
+      subtaskCount: real.length,
+      subtaskDone: real.filter((x) => x.done).length,
+      attachmentCount: attachments.length,
+    };
+    if (next.subtaskCount !== t.subtaskCount || next.subtaskDone !== t.subtaskDone || next.attachmentCount !== t.attachmentCount)
+      onReplace({ ...t, ...next });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [subtasks, attachments]);
 
   const can = (field: string) => canEditField(viewer, field, t);
   const canCollab = canManageCollaborators(viewer, t);
@@ -214,7 +169,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
     });
   }
 
-  // @mention autocomplete
+  // @mention autocomplete: watch the word being typed
   function onDraftChange(v: string) {
     setDraft(v);
     const el = inputRef.current;
@@ -240,7 +195,7 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
   }
   const set = (field: string) => (v: string) => onUpdate(t.id, { [field]: field === "revisionRound" ? Number(v) : v });
 
-  // Comment
+  // Comment appears instantly; it's swapped for the saved one when the server replies.
   function post() {
     const body = draft.trim();
     if (!body) return;
@@ -258,66 +213,6 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
         setDraft(body);
         setErr(e instanceof Error ? e.message : "Couldn't post");
       });
-  }
-
-  // Attachments
-  function submitAttachment(e: React.FormEvent) {
-    e.preventDefault();
-    const url = attachUrl.trim();
-    if (!url) return;
-    start(async () => {
-      try {
-        const a = await addAttachment(t.id, url, attachLabel);
-        setAttachments((x) => [...(x ?? []), a]);
-        setAttachUrl("");
-        setAttachLabel("");
-        setShowAttachForm(false);
-      } catch (ex) {
-        setErr(ex instanceof Error ? ex.message : "Couldn't add attachment");
-      }
-    });
-  }
-
-  function removeAttachment(id: string) {
-    if (!confirm("Remove this attachment?")) return;
-    setAttachments((x) => (x ?? []).filter((a) => a.id !== id));
-    deleteAttachment(id).catch((e) => {
-      setErr(e instanceof Error ? e.message : "Couldn't remove attachment");
-      // re-fetch on failure
-      getAttachments(t.id).then(setAttachments).catch(() => {});
-    });
-  }
-
-  // Storage device quick-create
-  async function addNewDevice() {
-    const name = newDeviceName.trim();
-    if (!name) return;
-    try {
-      const d = await createStorageDevice(name);
-      setStorageDevices((prev) => [...prev, d].sort((a, b) => a.name.localeCompare(b.name)));
-      onUpdate(t.id, { storageDeviceId: d.id });
-      setNewDeviceName("");
-      setShowNewDevice(false);
-    } catch (ex) {
-      setErr(ex instanceof Error ? ex.message : "Couldn't create device");
-    }
-  }
-
-  // Subtask creation
-  function submitSubtask(e: React.FormEvent) {
-    e.preventDefault();
-    const titleTrimmed = newSubtaskTitle.trim();
-    if (!titleTrimmed) return;
-    start(async () => {
-      try {
-        const sub = await createTask({ title: titleTrimmed, parentId: t.id, brandId: t.brandId });
-        setSubtasks((x) => [...(x ?? []), sub]);
-        setNewSubtaskTitle("");
-        setShowSubtaskForm(false);
-      } catch (ex) {
-        setErr(ex instanceof Error ? ex.message : "Couldn't add subtask");
-      }
-    });
   }
 
   return (
@@ -371,6 +266,11 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
 
       <div className="scroll-thin flex-1 overflow-y-auto">
         <div className="px-4 pb-4 pt-5 md:px-6">
+          {err && (
+            <button onClick={() => setErr(null)} className="mb-3 block w-full rounded-md bg-rose-50 px-3 py-2 text-left text-[12px] text-rose-700">
+              {err} <span className="text-rose-400">(dismiss)</span>
+            </button>
+          )}
           <div className="mb-1 text-[11px] text-muted">{t.code} · added {fmtDate(t.addedOn, true)}</div>
           {can("title") ? (
             <textarea
@@ -385,6 +285,11 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
           )}
 
           <div className="mt-4 space-y-0.5">
+            <Row label="Status">
+              <div className="w-40 px-1">
+                <StatusSelect t={t} disabled={!can("editStatus")} onUpdate={onUpdate} />
+              </div>
+            </Row>
             <Row label="Assignee">
               <CellSelect
                 value={t.assigneeId ?? ""}
@@ -430,20 +335,6 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
                 <span className="px-2 text-[13px]">{t.createdByName}</span>
               </Row>
             )}
-            <Row label="On hold">
-              <button
-                disabled={!can("onHold")}
-                onClick={() => onUpdate(t.id, { onHold: !t.onHold })}
-                className={cn(
-                  "ml-1 inline-flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-[12px] font-medium disabled:cursor-default",
-                  t.onHold ? "bg-amber-50 text-amber-700" : "bg-canvas text-muted hover:text-ink",
-                )}
-                title={can("onHold") ? (t.onHold ? "Take off hold" : "Put on hold (pauses reminders)") : undefined}
-              >
-                <PauseCircle className="h-3.5 w-3.5" />
-                {t.onHold ? "On hold" : "No"}
-              </button>
-            </Row>
             <Row label="Brand">
               <CellSelect
                 value={t.brandId ?? ""}
@@ -452,28 +343,38 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
                 onChange={(v) => onUpdate(t.id, { brandId: v || null })}
               />
             </Row>
-
-            {/* ── Three date fields ── */}
-            <Row label="Start date">
+            <Row label="Start">
               <input
                 type="datetime-local"
-                disabled={!can("startDate")}
-                value={t.startDate ? t.startDate.slice(0, 16) : ""}
-                onChange={(e) => onUpdate(t.id, { startDate: e.target.value || null })}
+                disabled={!can("startAt")}
+                value={toInputDateTime(t.startAt)}
+                onChange={(e) => onUpdate(t.id, { startAt: fromInputDateTime(e.target.value) })}
                 className="cell-select"
+                title="When the work started"
               />
             </Row>
-            <Row label="End date">
+            <Row label="End">
               <input
                 type="datetime-local"
+                disabled={!can("endAt")}
+                value={toInputDateTime(t.endAt)}
+                onChange={(e) => onUpdate(t.id, { endAt: fromInputDateTime(e.target.value) })}
+                className="cell-select"
+                title="When it's planned to end / be delivered (can be the same day as Start, different time)"
+              />
+            </Row>
+            <Row label="Due date">
+              <input
+                type="date"
                 disabled={!can("internalDeadline")}
-                value={t.internalDeadline ? t.internalDeadline.slice(0, 16) : ""}
+                value={toInputDate(t.internalDeadline)}
                 onChange={(e) => onUpdate(t.id, { internalDeadline: e.target.value || null })}
                 className="cell-select"
+                title="When it should be complete"
               />
             </Row>
             {seeAll && (
-              <Row label="Due date">
+              <Row label="Client deadline">
                 <input
                   type="date"
                   disabled={!can("externalDeadline")}
@@ -486,201 +387,55 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
             {(t.intDeadlineChanges > 0 || (seeAll && t.extDeadlineChanges > 0)) && (
               <Row label="Deadline pushed">
                 <span className="px-2 text-[12px] text-amber-700">
-                  {seeAll ? `End ×${t.intDeadlineChanges} · Due ×${t.extDeadlineChanges}` : `×${t.intDeadlineChanges}`}
+                  {seeAll ? `Team ×${t.intDeadlineChanges} · Client ×${t.extDeadlineChanges}` : `×${t.intDeadlineChanges}`}
                 </span>
               </Row>
             )}
-
+            <Row label="Storage">
+              <StoragePicker
+                value={t.storageId}
+                storages={storages}
+                disabled={!can("storageId")}
+                onChange={(id) => onUpdate(t.id, { storageId: id })}
+                onCreated={onStorageCreated}
+                onError={setErr}
+              />
+            </Row>
             <Row label="Priority"><CellSelect value={t.priority} disabled={!can("priority")} options={opts(PRIORITIES)} onChange={set("priority")} /></Row>
             <Row label="Type"><CellSelect value={t.type ?? ""} disabled={!can("type")} options={opts(TYPES)} onChange={set("type")} /></Row>
             <Row label="Platform"><CellSelect value={t.platform ?? ""} disabled={!can("platform")} options={opts(PLATFORMS)} onChange={set("platform")} /></Row>
             <Row label="Dept"><CellSelect value={t.dept} disabled={!can("dept")} options={opts(DEPTS)} onChange={set("dept")} /></Row>
-
-            {/* Storage Name */}
-            <Row label="Storage">
-              {showNewDevice ? (
-                <div className="flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
-                  <input
-                    autoFocus
-                    value={newDeviceName}
-                    onChange={(e) => setNewDeviceName(e.target.value)}
-                    onKeyDown={(e) => { if (e.key === "Enter") addNewDevice(); if (e.key === "Escape") setShowNewDevice(false); }}
-                    placeholder="Device name…"
-                    className="field-input flex-1 py-0.5 text-[13px]"
-                  />
-                  <button onClick={addNewDevice} className="btn-primary px-2 py-0.5 text-[12px]">Add</button>
-                  <button onClick={() => setShowNewDevice(false)} className="btn-ghost px-2 py-0.5 text-[12px]">×</button>
-                </div>
-              ) : (
-                <div className="flex items-center gap-1">
-                  <CellSelect
-                    value={t.storageDeviceId ?? ""}
-                    disabled={!can("storageDeviceId")}
-                    placeholder="None"
-                    options={[{ value: "", label: "None" }, ...storageDevices.map((d) => ({ value: d.id, label: d.name }))]}
-                    onChange={(v) => onUpdate(t.id, { storageDeviceId: v || null })}
-                  />
-                  {can("storageDeviceId") && (
-                    <button onClick={() => setShowNewDevice(true)} className="btn-ghost px-1.5 py-0.5 text-[11px] text-muted hover:text-ink" title="Add new storage device">
-                      + New
-                    </button>
-                  )}
-                </div>
-              )}
-            </Row>
-
-            {/* Estimated hours (admin/manager only) */}
-            {seeAll && (
-              <Row label="Est. hours">
-                <input
-                  type="number"
-                  min={0}
-                  step={0.5}
-                  disabled={!can("estimatedHours")}
-                  value={t.estimatedHours ?? ""}
-                  onChange={(e) => onUpdate(t.id, { estimatedHours: e.target.value ? Number(e.target.value) : null })}
-                  placeholder="—"
-                  className="cell-select w-24"
-                />
-              </Row>
-            )}
           </div>
 
           <h3 className="mb-1 mt-6 text-[12px] font-semibold uppercase tracking-wide text-muted">Pipeline</h3>
           <div className="space-y-0.5">
-            <Row label="Status">
-              <CellSelect
-                value={boardColumn(t)}
-                disabled={!can("editStatus") && !can("onHold")}
-                options={BOARD_STATUS_OPTS}
-                onChange={(v) => onUpdate(t.id, boardStatusPatch(t, v as BoardKey))}
-              />
-            </Row>
             <Row label="Brief"><CellSelect value={t.briefStage} disabled={!can("briefStage")} options={opts(BRIEF_STAGES)} onChange={set("briefStage")} /></Row>
             <Row label="Concept / script"><CellSelect value={t.scriptStage} disabled={!can("scriptStage")} options={opts(SCRIPT_STAGES)} onChange={set("scriptStage")} /></Row>
             <Row label="Pre-pro"><CellSelect value={t.preProStage} disabled={!can("preProStage")} options={opts(PREPRO_STAGES)} onChange={set("preProStage")} /></Row>
             <Row label="Shoot"><CellSelect value={t.shootStatus} disabled={!can("shootStatus")} options={opts(SHOOT_STATUSES)} onChange={set("shootStatus")} /></Row>
             <Row label="Edit status"><CellSelect value={t.editStatus} disabled={!can("editStatus")} options={opts(EDIT_STATUSES)} onChange={set("editStatus")} /></Row>
             <Row label="Revision round"><CellSelect value={String(t.revisionRound)} disabled={!can("revisionRound")} options={opts(REVISION_ROUNDS)} onChange={set("revisionRound")} /></Row>
+            <Row label="Client review"><CellSelect value={t.clientReview} disabled={!can("clientReview")} options={opts(CLIENT_REVIEW)} onChange={set("clientReview")} /></Row>
+            <Row label="Final approval"><CellSelect value={t.finalApproval} disabled={!can("finalApproval")} options={opts(FINAL_APPROVAL)} onChange={set("finalApproval")} /></Row>
+            <Row label="Delivery"><CellSelect value={t.deliveryStatus} disabled={!can("deliveryStatus")} options={opts(DELIVERY_STATUSES)} onChange={set("deliveryStatus")} /></Row>
           </div>
 
-          {/* Subtasks */}
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                Subtasks{t.subtaskCount > 0 ? ` (${t.subtaskCount})` : ""}
-              </h3>
-              {!t.parentId && (
-                <button
-                  onClick={() => setShowSubtaskForm((v) => !v)}
-                  className="btn-ghost gap-1 px-2 py-0.5 text-[12px]"
-                >
-                  <Plus className="h-3 w-3" /> Add subtask
-                </button>
-              )}
-            </div>
-            {t.parentId && (
-              <p className="mb-2 text-[12px] text-muted">This is a subtask. Subtasks can't have their own subtasks.</p>
-            )}
-            {showSubtaskForm && (
-              <form onSubmit={submitSubtask} className="mb-2 flex items-center gap-2">
-                <input
-                  autoFocus
-                  value={newSubtaskTitle}
-                  onChange={(e) => setNewSubtaskTitle(e.target.value)}
-                  placeholder="Subtask name…"
-                  className="field-input flex-1 text-[13px]"
-                />
-                <button type="submit" className="btn-primary px-2 py-0.5 text-[12px]">Add</button>
-                <button type="button" onClick={() => setShowSubtaskForm(false)} className="btn-ghost px-2 py-0.5 text-[12px]">Cancel</button>
-              </form>
-            )}
-            {subtasks && subtasks.length > 0 && (
-              <div className="space-y-1">
-                {subtasks.map((s) => (
-                  <div
-                    key={s.id}
-                    className="flex cursor-pointer items-center gap-2 rounded-md border border-line bg-canvas px-3 py-2 text-[13px] hover:bg-surface"
-                    onClick={() => onOpen?.(s.id)}
-                  >
-                    <span className="h-3 w-3 shrink-0 rounded-full border border-muted/50" />
-                    <span className="min-w-0 flex-1 truncate">{s.title}</span>
-                    <span className="shrink-0 text-[11px] text-muted">{s.code}</span>
-                  </div>
-                ))}
-              </div>
-            )}
-            {subtasks?.length === 0 && !showSubtaskForm && (
-              <p className="text-[12px] text-muted">No subtasks yet.</p>
-            )}
-          </div>
-
-          {/* Attachments */}
-          <div className="mt-6">
-            <div className="mb-2 flex items-center justify-between">
-              <h3 className="text-[12px] font-semibold uppercase tracking-wide text-muted">
-                Attachments{attachments?.length ? ` (${attachments.length})` : ""}
-              </h3>
-              <button
-                onClick={() => setShowAttachForm((v) => !v)}
-                className="btn-ghost gap-1 px-2 py-0.5 text-[12px]"
-              >
-                <Paperclip className="h-3 w-3" /> Add link
-              </button>
-            </div>
-            {showAttachForm && (
-              <form onSubmit={submitAttachment} className="mb-3 space-y-2">
-                <input
-                  autoFocus
-                  value={attachUrl}
-                  onChange={(e) => setAttachUrl(e.target.value)}
-                  placeholder="Paste a Google Drive or any URL…"
-                  className="field-input w-full text-[13px]"
-                  type="url"
-                />
-                <div className="flex gap-2">
-                  <input
-                    value={attachLabel}
-                    onChange={(e) => setAttachLabel(e.target.value)}
-                    placeholder="Label (optional)"
-                    className="field-input flex-1 text-[13px]"
-                  />
-                  <button type="submit" disabled={!attachUrl.trim()} className="btn-primary px-3 text-[12px]">Save</button>
-                  <button type="button" onClick={() => setShowAttachForm(false)} className="btn-ghost px-3 text-[12px]">Cancel</button>
-                </div>
-              </form>
-            )}
-            {attachments === null && <p className="text-[12px] text-muted">Loading…</p>}
-            {attachments?.length === 0 && !showAttachForm && (
-              <p className="text-[12px] text-muted">No attachments. Paste a Drive link or any URL above.</p>
-            )}
-            {attachments && attachments.length > 0 && (
-              <div className="space-y-1.5">
-                {attachments.map((a) => (
-                  <AttachmentItem
-                    key={a.id}
-                    a={a}
-                    canDelete={a.addedById === viewerId || seeAll}
-                    onDelete={() => removeAttachment(a.id)}
-                  />
-                ))}
-              </div>
-            )}
-          </div>
-
-          <h3 className="mb-1.5 mt-6 text-[12px] font-semibold uppercase tracking-wide text-muted">Context for the team</h3>
-          {seeAll ? (
+          <h3 className="mb-1.5 mt-6 text-[12px] font-semibold uppercase tracking-wide text-muted">Description</h3>
+          {can("context") ? (
             <textarea
               value={context}
               onChange={(e) => setContext(e.target.value)}
               onBlur={() => context !== (t.context ?? "") && onUpdate(t.id, { context })}
               rows={3}
-              placeholder="Brief, references, what the assignee needs to know…"
+              placeholder="Brief, references, what the team needs to know…"
               className="field-input resize-y"
             />
           ) : (
-            <div className="rounded-md bg-canvas px-3 py-2 text-[13px]">{t.context ? <RichText text={t.context} /> : <span className="text-muted">No context added</span>}</div>
+            <div className="rounded-md bg-canvas px-3 py-2 text-[13px]">{t.context ? <RichText text={t.context} /> : <span className="text-muted">No description yet</span>}</div>
           )}
+
+          <Subtasks projectId={t.id} items={subtasks} setItems={setSubtasks} people={people} canEdit onError={setErr} />
+          <Attachments projectId={t.id} items={attachments} setItems={setAttachments} onError={setErr} />
 
           {seeAll && (
             <>
@@ -772,7 +527,6 @@ export default function TaskPanel({ task: t, people, brands, viewer, onClose, on
 
       {tab === "updates" && (
         <div className="relative border-t border-line px-4 py-3">
-          {err && <p className="mb-2 text-[12px] text-rose-600">{err}</p>}
           {mentionOptions.length > 0 && (
             <div className="absolute bottom-full left-4 mb-1 w-64 overflow-hidden rounded-lg border border-line bg-surface shadow-pop">
               {mentionOptions.map((p) => (

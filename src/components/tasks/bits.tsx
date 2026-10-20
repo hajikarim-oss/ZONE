@@ -1,9 +1,9 @@
 "use client";
 
-import { computeStage, computeDelay, priorityColor, STAGE_GROUPS } from "@/lib/status";
+import { BOARD_COLUMNS, type BoardKey, STAGE_GROUPS, boardColumn, computeDelay, computeStage, priorityColor } from "@/lib/status";
+import { dropPatch } from "@/lib/board";
 import type { TaskDTO } from "@/lib/dto";
 import { cn, relativeDue } from "@/lib/utils";
-import { Pause } from "lucide-react";
 
 export function StagePill({ t, className }: { t: TaskDTO; className?: string }) {
   const s = computeStage(t);
@@ -59,20 +59,6 @@ export function DelayBadge({ t }: { t: TaskDTO }) {
   );
 }
 
-export function OnHoldBadge({ onHold, onClick, canEdit }: { onHold: boolean; onClick?: () => void; canEdit?: boolean }) {
-  if (!onHold) return null;
-  return (
-    <button
-      onClick={(e) => { e.stopPropagation(); onClick?.(); }}
-      disabled={!canEdit || !onClick}
-      title={canEdit ? "Take off hold" : "On hold"}
-      className="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-700 disabled:cursor-default"
-    >
-      <Pause className="h-2.5 w-2.5" /> On hold
-    </button>
-  );
-}
-
 export function BrandChip({ name, color }: { name: string | null; color: string | null }) {
   if (!name) return <span className="text-[13px] text-muted/60">—</span>;
   return (
@@ -118,3 +104,39 @@ export function CellSelect({
 }
 
 export const opts = (xs: readonly (string | number)[]) => xs.map((x) => ({ value: String(x), label: String(x) }));
+
+// One Status everywhere (list, board, cards, panel): the five board columns.
+export function StatusSelect({
+  t,
+  disabled,
+  onUpdate,
+  className,
+}: {
+  t: TaskDTO;
+  disabled?: boolean;
+  onUpdate: (id: string, patch: Record<string, unknown>) => void;
+  className?: string;
+}) {
+  const col = boardColumn(t);
+  const c = BOARD_COLUMNS.find((x) => x.key === col)!;
+  return (
+    <span className={cn("inline-flex w-full min-w-0 items-center gap-1.5 rounded-full pl-2", className)} style={{ background: c.dot + "2b" }}>
+      <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: c.dot }} />
+      <select
+        value={col}
+        disabled={disabled}
+        onClick={(e) => e.stopPropagation()}
+        onChange={(e) => {
+          const patch = dropPatch(t, e.target.value as BoardKey);
+          if (patch) onUpdate(t.id, patch);
+        }}
+        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent py-0.5 pr-2 text-[12px] font-medium text-ink outline-none disabled:cursor-default"
+        title={c.hint}
+      >
+        {BOARD_COLUMNS.map((x) => (
+          <option key={x.key} value={x.key}>{x.label}</option>
+        ))}
+      </select>
+    </span>
+  );
+}

@@ -31,6 +31,8 @@ model User {
   collaborating Project[]      @relation("Collaborators")
   notifications Notification[]
   updates       Update[]
+  brands        Brand[]        @relation("BrandMembers") // brand workspaces they belong to
+  subtasks      Subtask[]
 }
 
 // BRAND REGISTRY
@@ -44,6 +46,7 @@ model Brand {
 
   projects Project[]
   clients  Client[]
+  members  User[]    @relation("BrandMembers") // workspace members (see all its tasks)
 }
 
 // Brand POC logins (replaces the per-brand Google Sheet)
@@ -80,10 +83,13 @@ model Project {
 
   onHold Boolean @default(false) // board column "On hold"
 
-  // Three-date model: Start (when work begins), End (internal handoff), Due (client/project close)
-  startDate        DateTime? // when work begins (datetime, team-visible)
-  externalDeadline DateTime? // Due Date — client-facing / project-close date
-  internalDeadline DateTime? // End Date — internal handoff deadline
+  externalDeadline DateTime? // client deadline (admins / managers only)
+  internalDeadline DateTime? // "Due date": when it should be complete
+  startAt          DateTime? // when the work started (date + time)
+  endAt            DateTime? // when it's planned to end / be delivered (date + time)
+
+  storageId String?
+  storage   Storage? @relation(fields: [storageId], references: [id], onDelete: SetNull)
 
   briefStage     String @default("Not Started")
   scriptStage    String @default("Not Started")
@@ -95,13 +101,8 @@ model Project {
   finalApproval  String @default("Pending")
   deliveryStatus String @default("Not Started")
 
-  notes          String? // internal notes (admin/manager)
-  context        String? // "context from Sachin" — shown read-only to the assignee
-  estimatedHours Float?  // time allocation (admin visibility)
-
-  // Storage tracking — which physical drive / folder holds the project files
-  storageDeviceId String?
-  storageDevice   StorageDevice? @relation(fields: [storageDeviceId], references: [id], onDelete: SetNull)
+  notes   String? // internal notes (admin/manager)
+  context String? // "context from Sachin" — shown read-only to the assignee
 
   extDeadlineChanges Int @default(0)
   intDeadlineChanges Int @default(0)
@@ -116,19 +117,14 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  // Subtask support (Asana-style, one level deep)
-  parentId String?
-  parent   Project?  @relation("Subtasks", fields: [parentId], references: [id], onDelete: Cascade)
-  subtasks Project[] @relation("Subtasks")
-
   updates     Update[]
   activity    Activity[]
+  subtasks    Subtask[]
   attachments Attachment[]
 
   @@index([assigneeId])
   @@index([brandId])
   @@index([archived])
-  @@index([parentId])
 }
 
 // Editor notes / links thread on a project (old "EDITOR NOTES / LINKS" col)
@@ -180,23 +176,42 @@ model AutomationRun {
   ranAt  DateTime @default(now())
 }
 
-// Physical storage devices / folders where project files live (dropdown in task panel)
-model StorageDevice {
+// Where the footage / project files live (hard drive, NAS folder…)
+model Storage {
   id        String    @id @default(cuid())
-  name      String    @unique // "WD 4TB Black", "Seagate NAS 2", etc.
+  name      String    @unique
   createdAt DateTime  @default(now())
   projects  Project[]
 }
 
-// File attachments on a task — primarily Google Drive links, optionally uploaded files
+// Asana-style subtasks: a checklist of small tasks inside a task
+model Subtask {
+  id         String    @id @default(cuid())
+  projectId  String
+  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title      String
+  assigneeId String?
+  assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueDate    DateTime?
+  done       Boolean   @default(false)
+  position   Int       @default(0)
+  createdAt  DateTime  @default(now())
+
+  @@index([projectId])
+  @@index([assigneeId])
+}
+
+// Files on a task: Google Drive files / folders or any link
 model Attachment {
-  id        String   @id @default(cuid())
-  projectId String
-  project   Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  addedById String?  // userId who attached it
-  url       String   // Drive URL or blob key
-  label     String?  // optional display name
-  createdAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  projectId   String
+  project     Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  name        String
+  url         String
+  mimeType    String?
+  iconUrl     String?
+  addedByName String
+  createdAt   DateTime @default(now())
 
   @@index([projectId])
 }

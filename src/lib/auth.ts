@@ -108,11 +108,15 @@ export async function currentUser(): Promise<SessionUser | null> {
 // "Inactive" takes effect immediately, not only after the JWT expires.
 // Looks the person up by id, falling back to email (the id inside an old
 // login cookie goes stale if the database is recreated or re-imported).
+// Also loads the brand workspaces the person is a member of (brandIds).
 async function findTeamUser(s: SessionUser) {
-  return (
-    (s.id ? await prisma.user.findUnique({ where: { id: s.id } }) : null) ??
-    (s.email ? await prisma.user.findUnique({ where: { email: s.email.toLowerCase() } }) : null)
-  );
+  const withBrands = { brands: { select: { id: true } } } as const;
+  const u =
+    (s.id ? await prisma.user.findUnique({ where: { id: s.id }, include: withBrands }) : null) ??
+    (s.email ? await prisma.user.findUnique({ where: { email: s.email.toLowerCase() }, include: withBrands }) : null);
+  if (!u) return null;
+  const { brands, ...user } = u;
+  return { ...user, brandIds: brands.map((b) => b.id) };
 }
 
 // Is this session still valid against the database? Used by /login and / so

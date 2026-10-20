@@ -1,4 +1,4 @@
-import type { Attachment, Brand, Project, StorageDevice, User } from "@prisma/client";
+import type { Brand, Project, User } from "@prisma/client";
 
 // Serializable shape passed from server pages to client components.
 export type TaskDTO = {
@@ -14,10 +14,12 @@ export type TaskDTO = {
   assigneeId: string | null;
   assigneeName: string | null;
   priority: string;
-  // Three date fields
-  startDate: string | null;        // when work begins (datetime)
-  internalDeadline: string | null; // End Date — internal handoff
-  externalDeadline: string | null; // Due Date — client/project close
+  externalDeadline: string | null;
+  internalDeadline: string | null; // "Due date"
+  startAt: string | null;
+  endAt: string | null;
+  storageId: string | null;
+  storageName: string | null;
   briefStage: string;
   scriptStage: string;
   preProStage: string;
@@ -29,9 +31,6 @@ export type TaskDTO = {
   deliveryStatus: string;
   notes: string | null;
   context: string | null;
-  estimatedHours: number | null;
-  storageDeviceId: string | null;
-  storageDeviceName: string | null;
   extDeadlineChanges: number;
   intDeadlineChanges: number;
   archived: boolean;
@@ -41,33 +40,26 @@ export type TaskDTO = {
   collaborators: { id: string; name: string }[];
   collaboratorIds: string[];
   commentCount: number;
-  // Subtask support
-  parentId: string | null;
   subtaskCount: number;
+  subtaskDone: number;
+  subtaskAssigneeIds: string[];
+  attachmentCount: number;
   addedOn: string;
   updatedAt: string;
 };
 
-export type AttachmentDTO = {
-  id: string;
-  url: string;
-  label: string | null;
-  addedById: string | null;
-  createdAt: string;
-};
-
-export type StorageDeviceDTO = { id: string; name: string };
 export type PersonDTO = { id: string; name: string; department: string; active: boolean };
 export type BrandDTO = { id: string; name: string; color: string };
+export type StorageDTO = { id: string; name: string };
 
 export const taskInclude = {
   brand: true,
   assignee: true,
   createdBy: { select: { id: true, name: true } },
   collaborators: { select: { id: true, name: true }, orderBy: { name: "asc" } },
-  storageDevice: { select: { id: true, name: true } },
-  attachments: { orderBy: { createdAt: "asc" } },
-  _count: { select: { updates: true, subtasks: true } },
+  storage: { select: { id: true, name: true } },
+  subtasks: { select: { id: true, done: true, assigneeId: true } },
+  _count: { select: { updates: true, attachments: true } },
 } as const;
 
 type TaskRow = Project & {
@@ -75,9 +67,9 @@ type TaskRow = Project & {
   assignee: User | null;
   createdBy: { id: string; name: string } | null;
   collaborators: { id: string; name: string }[];
-  storageDevice: { id: string; name: string } | null;
-  attachments: Attachment[];
-  _count?: { updates: number; subtasks: number };
+  storage?: { id: string; name: string } | null;
+  subtasks?: { id: string; done: boolean; assigneeId: string | null }[];
+  _count?: { updates: number; attachments?: number };
 };
 
 export function toTaskDTO(p: TaskRow): TaskDTO {
@@ -94,9 +86,12 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     assigneeId: p.assigneeId,
     assigneeName: p.assignee?.name ?? null,
     priority: p.priority,
-    startDate: p.startDate?.toISOString() ?? null,
-    internalDeadline: p.internalDeadline?.toISOString() ?? null,
     externalDeadline: p.externalDeadline?.toISOString() ?? null,
+    internalDeadline: p.internalDeadline?.toISOString() ?? null,
+    startAt: p.startAt?.toISOString() ?? null,
+    endAt: p.endAt?.toISOString() ?? null,
+    storageId: p.storageId ?? null,
+    storageName: p.storage?.name ?? null,
     briefStage: p.briefStage,
     scriptStage: p.scriptStage,
     preProStage: p.preProStage,
@@ -108,9 +103,6 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     deliveryStatus: p.deliveryStatus,
     notes: p.notes,
     context: p.context,
-    estimatedHours: p.estimatedHours,
-    storageDeviceId: p.storageDeviceId,
-    storageDeviceName: p.storageDevice?.name ?? null,
     extDeadlineChanges: p.extDeadlineChanges,
     intDeadlineChanges: p.intDeadlineChanges,
     archived: p.archived,
@@ -120,8 +112,10 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     collaborators: p.collaborators.map((c) => ({ id: c.id, name: c.name })),
     collaboratorIds: p.collaborators.map((c) => c.id),
     commentCount: p._count?.updates ?? 0,
-    parentId: p.parentId,
-    subtaskCount: p._count?.subtasks ?? 0,
+    subtaskCount: p.subtasks?.length ?? 0,
+    subtaskDone: p.subtasks?.filter((x) => x.done).length ?? 0,
+    subtaskAssigneeIds: [...new Set((p.subtasks ?? []).map((x) => x.assigneeId).filter((x): x is string => !!x))],
+    attachmentCount: p._count?.attachments ?? 0,
     addedOn: p.addedOn.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
@@ -131,7 +125,7 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
 // notes — stripped here on the server so they aren't even in the page data.
 export function forViewer(t: TaskDTO, seeAll: boolean): TaskDTO {
   if (seeAll) return t;
-  return { ...t, externalDeadline: null, extDeadlineChanges: 0, notes: null, estimatedHours: null };
+  return { ...t, externalDeadline: null, extDeadlineChanges: 0, notes: null };
 }
 
 export function toPeople(users: User[]): PersonDTO[] {
@@ -140,12 +134,4 @@ export function toPeople(users: User[]): PersonDTO[] {
 
 export function toBrands(brands: Brand[]): BrandDTO[] {
   return brands.map((b) => ({ id: b.id, name: b.name, color: b.color }));
-}
-
-export function toStorageDevices(devices: StorageDevice[]): StorageDeviceDTO[] {
-  return devices.map((d) => ({ id: d.id, name: d.name }));
-}
-
-export function toAttachmentDTO(a: Attachment): AttachmentDTO {
-  return { id: a.id, url: a.url, label: a.label, addedById: a.addedById, createdAt: a.createdAt.toISOString() };
 }

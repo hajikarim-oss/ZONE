@@ -93,7 +93,7 @@ export default async function GuidePage() {
             <Table
               head={["Role", "Sees", "Can change"]}
               rows={[
-                ["Team member", "Tasks assigned to them, tasks they added, and tasks they collaborate on; the team deadline, context from their lead, comments and history.", "Add their own tasks; status, revision round, shoot status and On hold on tasks assigned to them; name, brand, deadline and priority on tasks they added; collaborators; comments."],
+                ["Team member", "Tasks assigned to them, tasks they added, and tasks they collaborate on; the due date, context from their lead, comments and history.", "Add their own tasks; status, revision round, shoot status and On hold on tasks assigned to them; name, brand, deadline and priority on tasks they added; collaborators; comments."],
                 ["Manager", "Every project and brand, both deadlines, internal notes, team status and delay tracker, Completed.", "Everything on every task; add tasks; move tasks to Completed."],
                 ["Admin", "Everything managers see, plus Team, Brands & clients and Automations.", "Everything, plus people, roles, Active/Inactive, brands, client logins and deleting tasks."],
                 ["Brand client", "Only their brand's content, in friendly wording, with the revision round and delivery date.", "Nothing; view only."],
@@ -122,13 +122,15 @@ export default async function GuidePage() {
             <Table
               head={["Step", "Options", "Notes"]}
               rows={[
-                ["Status", "Upcoming → Ongoing → Revision → On hold → Completed", "The main stage tracking the deliverable across the board."],
                 ["Brief", "Not Started → Brief Received → Brief Call Done", ""],
                 ["Concept / script", "Not Started → In Progress → Sent to Client → Approved", "Creative team members update this one; it's the status column in their list."],
                 ["Pre-pro", "Not Started → In Progress → Complete", ""],
                 ["Shoot", "Not Started → Scheduled → Done → Footage Received", "Footage Received means editing can start."],
                 ["Edit status", "Not Started → In Progress → First Cut Ready → First Cut Sent → In Review → Internal Revision R1–R4 / External Revision R1–R4 → Final Approved", "The main status editors update."],
                 ["Revision round", "0–4", "Set automatically by External Revision Rn; can also be set by hand."],
+                ["Client review", "Pending / Received / NA", ""],
+                ["Final approval", "Pending / Approved / NA", "Set to Approved automatically when Edit status becomes Final Approved."],
+                ["Delivery", "Not Started → Files Sent → Invoice Raised → Project Closed", "Files Sent = delivered. Project Closed = done; it moves to Completed after 30 days."],
               ]}
             />
             <p><b>Internal revision</b> = changes asked for by TBM before the brand sees it. <b>External revision</b> = changes asked for by the brand.</p>
@@ -148,9 +150,13 @@ export default async function GuidePage() {
               <li><span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-700">Team late · Nd</span> past the {seeAll ? "team" : ""} deadline while the work is with us.</li>
               <li><span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Waiting on brand · Nd</span> the cut has been sent / is in review and the brand hasn't come back.</li>
             </ul>
+            <p>
+              <b>Start</b> and <b>End</b> (date + time) are when the work starts and is planned to end; they can be the same day at
+              different times. <b>Due date</b> is when the task should be complete (late tags are worked out from it).
+            </p>
             {seeAll ? (
               <p>
-                <b>Team deadline</b> is the internal due date (what the team sees). <b>Client deadline</b> is what was promised to
+                <b>Due date</b> is the internal due date (what the team sees). <b>Client deadline</b> is what was promised to
                 the brand (what the brand sees as "Delivery date"). Every time either is pushed, the task counts it.
               </p>
             ) : (
@@ -166,7 +172,10 @@ export default async function GuidePage() {
               <li>A comment from the assignee counts as updating the task (it resets their reminders).</li>
               <li><b>On hold</b> (toggle in the task panel, or drag to the On hold column) pauses a task: no late tags and no reminders until it's taken off hold.</li>
               <li><b>Activity</b> shows every change: who changed which field, from what, to what, and when.</li>
-              <li><b>Context for the team</b> is the brief from your lead{seeAll ? " (you write it; team members can read it)" : " (read-only for you)"}.</li>
+              <li><b>Description</b> is the brief. Admins / managers and whoever added the task can edit it.</li>
+              <li><b>Subtasks</b>: break a task into small steps, each with its own assignee and due date. Tick them off as you go. A subtask assigned to you makes the task show in your My tasks.</li>
+              <li><b>Attachments</b>: click <b>Google Drive</b> to attach files or folders straight from Drive, or <b>Paste a link</b> (Drive, WeTransfer, Frame.io…). Big footage stays in Drive.</li>
+              <li><b>Storage</b>: pick which hard drive / folder the project files are on. Choose <b>+ Add new storage…</b> to add a new drive.</li>
               {seeAll && <li><b>Internal notes</b> are for admins and managers only.</li>}
             </ul>
           </Section>
@@ -194,7 +203,7 @@ export default async function GuidePage() {
               head={["Check", "Who's told", "Details"]}
               rows={[
                 ["Stale tasks", "Assignee", `One email listing tasks with no update for ${STALE_DAYS}+ day. Reminder #2 warns that admins will be told; from #${ESCALATE_AFTER} admins are copied in. Stops as soon as you update. Tasks waiting on the brand are skipped.`],
-                ["Deadlines coming up", "Assignee", `Team deadlines in the next ${DEADLINE_ALERT_DAYS} days.`],
+                ["Deadlines coming up", "Assignee", `Due dates in the next ${DEADLINE_ALERT_DAYS} days.`],
                 ["Brand feedback nudge", "Brand client logins", `A cut has been with the brand ${BRAND_NUDGE_DAYS}+ days; repeats every ${BRAND_NUDGE_DAYS} days.`],
                 ["Move to Completed", "—", `Projects closed ${ARCHIVE_AFTER_DAYS}+ days ago move to Completed.`],
                 ["Weekly report (Mondays)", "Admins", "Active, late, waiting on brand, delivered this week, due this week, top late projects."],
@@ -205,7 +214,7 @@ export default async function GuidePage() {
           {seeAll && (
             <Section id="managing" title="8. Managing projects">
               <ul className="list-disc space-y-1.5 pl-5">
-                <li><b>Add task</b> (All projects or a brand page): name, brand, assignee, priority, team deadline, client deadline. The code (TBM-…) is assigned automatically and the assignee is notified.</li>
+                <li><b>Add task</b> (All projects or a brand page): name, brand, assignee, priority, start / end, due date, client deadline. The code (TBM-…) is assigned automatically and the assignee is notified.</li>
                 <li>Change assignee, brand, priority or status <b>right in the list row</b>; open the task panel for everything else.</li>
                 <li>Use <b>Group</b> (stage / brand / assignee / priority), <b>filters</b> and <b>Search</b> to slice the list. Tick <b>Show delivered &amp; closed</b> to include finished work.</li>
                 <li><b>Board</b> has five columns (Upcoming, Ongoing, Revision, On hold, Completed); drag cards between them. <b>Calendar</b> shows team or client deadlines by date.</li>
@@ -248,13 +257,16 @@ export default async function GuidePage() {
               <li><b>In progress</b>: shown as Brief in progress, Pre-production, Shoot scheduled, Being edited, Being refined or Working on your feedback</li>
               <li><b>Delivered</b>: Delivered / Completed</li>
             </ul>
-            <p>They see the revision round and delivery date (the client deadline). They never see team names, team deadlines, internal notes or updates.</p>
+            <p>They see the revision round and delivery date (the client deadline). They never see team names, due dates, internal notes or updates.</p>
           </Section>
 
           <Section id="faq" title={`${admin ? 11 : seeAll ? 10 : 9}. FAQ`}>
             <div className="space-y-3">
               <p><b>I can't change a field.</b> On tasks assigned to you, you can change status, revision round, shoot status and On hold. On tasks you added you can also change the name, brand, deadline and priority. Ask your lead for anything else.</p>
               <p><b>A task is missing from My tasks.</b> It may not be assigned to you yet, or it's delivered / closed; tick "Show delivered &amp; closed" (on the Board, it's in the Completed column).</p>
+              <p><b>What is a brand workspace?</b> Each brand page (e.g. Unseen Man) is a workspace with its own board. Members (the people shown at the top right) see every task in it, can add tasks for anyone, and can add teammates. Tasks assigned to you there also show in your My tasks.</p>
+              <p><b>How do I join a workspace?</b> Ask an admin or any member to add you from the members button at the top right of the brand page.</p>
+              {admin && <p><b>Setting up the Google Drive button (admin, once):</b> in Google Cloud (same project as the Google sign-in) enable the <b>Google Picker API</b> and <b>Google Drive API</b>, create an <b>API key</b>, add your panel addresses under the OAuth client's "Authorised JavaScript origins", then add <code>NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> and <code>NEXT_PUBLIC_GOOGLE_API_KEY</code> in Vercel and .env. Until then, people can paste links.</p>}
               <p><b>Can I add my own task?</b> Yes. Use <b>Add task</b> in My tasks. It's assigned to you, and admins and managers can see it.</p>
               <p><b>Who can see a task I added?</b> You, any collaborators you add, and admins / managers. Other team members can't.</p>
               <p><b>How do I share a task with a teammate?</b> Add them under <b>Collaborators</b> in the task panel, or @mention them in a comment.</p>
@@ -264,7 +276,7 @@ export default async function GuidePage() {
               <p><b>Who sees my comments?</b> Everyone on the team who can see the task. Brand clients never see comments.</p>
               <p><b>I mentioned someone but they didn't get it.</b> Pick their name from the list that appears after typing @ so the full name is used.</p>
               <p><b>Can I use this on my phone?</b> Yes. Open the panel link in your phone browser and use "Add to Home Screen" to install it like an app.</p>
-              <p><b>Can I see the client deadline?</b> Team members see only the team deadline; the client deadline is for admins and managers.</p>
+              <p><b>Can I see the client deadline?</b> Team members see only the due date; the client deadline is for admins and managers.</p>
               <p><b>How do I stop reminder emails?</b> Update the task's status or post an update. Reminders only go out for tasks with no update for {STALE_DAYS}+ day.</p>
               <p><b>I can't sign in.</b> You must be added on the Team page first and be Active. Use the exact Google account your lead added.</p>
               <p><b>Do we still use the Google Sheets?</b> No. The panel is the only source of truth now; changes in the sheets don't show here.</p>

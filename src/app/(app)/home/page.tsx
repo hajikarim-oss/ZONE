@@ -2,7 +2,7 @@ import Link from "next/link";
 import Avatar from "@/components/Avatar";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canSeeAll, visibleToMember } from "@/lib/rbac";
+import { canSeeAll, myTasksFilter } from "@/lib/rbac";
 import { capacityFor, computeDelay, computeStage, isDone, startOfToday } from "@/lib/status";
 import { forViewer, taskInclude, toTaskDTO, type TaskDTO } from "@/lib/dto";
 import { cn, fmtDate } from "@/lib/utils";
@@ -44,7 +44,7 @@ export default async function HomePage() {
   const seeAll = canSeeAll(me);
 
   const rows = await prisma.project.findMany({
-    where: { archived: false, ...(seeAll ? {} : visibleToMember(me.id)) },
+    where: { archived: false, ...(seeAll ? {} : myTasksFilter(me.id)) },
     include: taskInclude,
   });
   const tasks = rows.map((r) => forViewer(toTaskDTO(r), seeAll));
