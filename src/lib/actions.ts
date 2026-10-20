@@ -747,3 +747,66 @@ export async function sendTestEmail(): Promise<{ ok: boolean; message: string }>
     ? { ok: true, message: `Sent to ${me.email}. Check your inbox (and spam).` }
     : { ok: false, message: `Couldn't send: ${r.error}` };
 }
+
+// ---------- Favorites (starred projects in the sidebar) ----------
+export async function toggleFavorite(brandId: string, on: boolean) {
+  const me = await requireTeamUser();
+  await prisma.user.update({
+    where: { id: me.id },
+    data: { favorites: on ? { connect: { id: brandId } } : { disconnect: { id: brandId } } },
+  });
+  revalidatePath("/", "layout");
+}
+
+// ---------- New project (brand workspace), like Asana's "+" ----------
+const PROJECT_COLORS = ["#f06a6a", "#f1bd6c", "#5da283", "#4ecbc4", "#4573d2", "#8d84e8", "#e362e3", "#fd612c", "#aecf55"];
+export async function createProject(input: { name: string; color?: string }): Promise<{ id: string }> {
+  const me = await requireTeamUser();
+  const name = input.name?.trim();
+  if (!name) throw new Error("Give the project a name");
+  const exists = await prisma.brand.findFirst({ where: { name: { equals: name, mode: "insensitive" } } });
+  if (exists) throw new Error(`"${exists.name}" already exists. Ask a member or an admin to add you to it.`);
+  const color = input.color && /^#[0-9a-f]{6}$/i.test(input.color) ? input.color : PROJECT_COLORS[Math.floor(Math.random() * PROJECT_COLORS.length)];
+  const b = await prisma.brand.create({
+    data: { name, color, members: { connect: { id: me.id } }, favoritedBy: { connect: { id: me.id } } },
+  });
+  revalidatePath("/", "layout");
+  return { id: b.id };
+}
+
+// ---------- Goals ----------
+const GOAL_STATUSES = ["On track", "At risk", "Off track", "Achieved"];
+export async function createGoal(input: { title: string; ownerId?: string | null; brandId?: string | null; dueDate?: string | null }) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only admins and managers can add goals");
+  const title = input.title?.trim();
+  if (!title) throw new Error("Give the goal a name");
+  await prisma.goal.create({
+    data: { title, ownerId: input.ownerId || me.id, brandId: input.brandId || null, dueDate: input.dueDate ? new Date(input.dueDate) : null },
+  });
+  revalidatePath("/goals");
+}
+
+export async function updateGoal(id: string, patch: { title?: string; ownerId?: string | null; dueDate?: string | null; progress?: number; status?: string; notes?: string }) {
+  const me = await requireTeamUser();
+  const g = await prisma.goal.findUnique({ where: { id } });
+  if (!g) throw new Error("Goal not found");
+  if (!canSeeAll(me) && g.ownerId !== me.id) throw new Error("Only the goal owner or a manager can update it");
+  const data: Record<string, unknown> = {};
+  if (patch.title !== undefined && patch.title.trim()) data.title = patch.title.trim();
+  if (patch.ownerId !== undefined && canSeeAll(me)) data.ownerId = patch.ownerId || null;
+  if (patch.dueDate !== undefined) data.dueDate = patch.dueDate ? new Date(patch.dueDate) : null;
+  if (patch.progress !== undefined) data.progress = Math.max(0, Math.min(100, Math.round(Number(patch.progress) || 0)));
+  if (patch.status !== undefined && GOAL_STATUSES.includes(patch.status)) data.status = patch.status;
+  if (patch.notes !== undefined) data.notes = patch.notes.trim() || null;
+  if (data.progress === 100 && !data.status) data.status = "Achieved";
+  await prisma.goal.update({ where: { id }, data });
+  revalidatePath("/goals");
+}
+
+export async function deleteGoal(id: string) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only admins and managers can delete goals");
+  await prisma.goal.delete({ where: { id } });
+  revalidatePath("/goals");
+}

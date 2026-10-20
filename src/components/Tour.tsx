@@ -3,7 +3,6 @@
 import { ArrowLeft, ArrowRight, X } from "lucide-react";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState } from "react";
-import { STAGE_GROUPS } from "@/lib/status";
 import { cn } from "@/lib/utils";
 
 // Guided tour of the panel. Starts automatically the first time someone signs
@@ -128,43 +127,16 @@ function buildSteps(role: string, first: string): Step[] {
   });
 
   s.push({
-    title: "The status flow",
+    title: "Status",
     body: (
       <>
-        <p>Move the <b>Edit status</b> along as you work:</p>
-        <Flow items={["Not Started", "In Progress", "First Cut Ready", "First Cut Sent", "In Review", "Revisions R1–R4", "Final Approved"]} />
+        <p>Every task has one <b>Status</b>, the same as the board columns:</p>
+        <Flow items={["Upcoming", "Ongoing", "Revision", "On hold", "Completed"]} />
         <ul className="mt-3 list-disc space-y-1 pl-4">
-          <li><b>First Cut Sent</b> emails the brand that it's ready for review.</li>
-          <li><b>External Revision Rn</b> sets the revision round to n automatically.</li>
-          <li><b>Final Approved</b> marks the final approval and tells the admins it's ready to deliver.</li>
+          <li>Change it from the Status dropdown, by dragging on the Board, or tick the circle / <b>Mark complete</b>.</li>
+          <li>Each move into <b>Revision</b> starts the next round; admins are told at round 3.</li>
+          <li><b>On hold</b> pauses reminders.</li>
         </ul>
-        {seeAll && (
-          <>
-            <p className="mt-3">Then the delivery column:</p>
-            <Flow items={["Files Sent", "Invoice Raised", "Project Closed"]} />
-          </>
-        )}
-        {!seeAll && <p className="mt-2 text-muted">Creative team: your list shows Script status instead (Not Started → In Progress → Sent to Client → Approved).</p>}
-      </>
-    ),
-  });
-
-  s.push({
-    title: "Stages and colours",
-    body: (
-      <>
-        <p>Each task's stage is worked out from its statuses, so it's always accurate:</p>
-        <div className="mt-2 flex flex-wrap gap-1">
-          {STAGE_GROUPS.map((g) => (
-            <Chip key={g.key} color={g.dot}>{g.label}</Chip>
-          ))}
-        </div>
-        <p className="mt-3">Late work gets a tag:</p>
-        <div className="mt-1 flex flex-wrap gap-1.5">
-          <span className="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-rose-700">Team late · 3d</span>
-          <span className="rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-amber-700">Waiting on brand · 2d</span>
-        </div>
-        <p className="mt-2 text-muted">Team late = past {seeAll ? "the team" : "your"} deadline while the work is with us. Waiting on brand = the cut is with the client.</p>
       </>
     ),
   });
@@ -231,7 +203,7 @@ function buildSteps(role: string, first: string): Step[] {
   });
 
   s.push({
-    title: "Notifications",
+    title: "Inbox",
     target: "nav-notifications",
     route: "/inbox",
     body: (

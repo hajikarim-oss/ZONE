@@ -4,7 +4,7 @@ import { CheckSquare, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { TaskDTO } from "@/lib/dto";
-import { BOARD_COLUMNS, boardColumn, computeStage, type BoardKey } from "@/lib/status";
+import { BOARD_COLUMNS, boardColumn, type BoardKey } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { BrandChip, DelayBadge, DueText, PriorityPill } from "./bits";
 
@@ -77,7 +77,7 @@ export default function TaskBoard({
                   )}
                 >
                   <div className="text-[13px] leading-snug">{t.title}</div>
-                  <div className="mt-1 text-[11px] text-muted">{t.code} · {computeStage(t).label}</div>
+                  <div className="mt-1 text-[11px] text-muted">{t.code}</div>
                   <div className="mt-2 flex flex-wrap items-center gap-1.5">
                     <PriorityPill value={t.priority} />
                     <DelayBadge t={t} />

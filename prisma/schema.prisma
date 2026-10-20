@@ -33,6 +33,8 @@ model User {
   updates       Update[]
   brands        Brand[]        @relation("BrandMembers") // brand workspaces they belong to
   subtasks      Subtask[]
+  favorites     Brand[]        @relation("Favorites")    // starred projects in the sidebar
+  goals         Goal[]
 }
 
 // BRAND REGISTRY
@@ -47,6 +49,8 @@ model Brand {
   projects Project[]
   clients  Client[]
   members  User[]    @relation("BrandMembers") // workspace members (see all its tasks)
+  favoritedBy User[] @relation("Favorites")
+  goals    Goal[]
 }
 
 // Brand POC logins (replaces the per-brand Google Sheet)
@@ -214,4 +218,20 @@ model Attachment {
   createdAt   DateTime @default(now())
 
   @@index([projectId])
+}
+
+// Goals (like Asana Goals): what the team is aiming for, with progress
+model Goal {
+  id        String    @id @default(cuid())
+  title     String
+  ownerId   String?
+  owner     User?     @relation(fields: [ownerId], references: [id], onDelete: SetNull)
+  brandId   String?
+  brand     Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  dueDate   DateTime?
+  progress  Int       @default(0) // 0-100
+  status    String    @default("On track") // On track | At risk | Off track | Achieved
+  notes     String?
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
 }

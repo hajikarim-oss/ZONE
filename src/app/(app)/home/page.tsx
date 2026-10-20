@@ -3,7 +3,7 @@ import Avatar from "@/components/Avatar";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canSeeAll, myTasksFilter } from "@/lib/rbac";
-import { capacityFor, computeDelay, computeStage, isDone, startOfToday } from "@/lib/status";
+import { BOARD_COLUMNS, boardColumn, capacityFor, computeDelay, isDone, startOfToday } from "@/lib/status";
 import { forViewer, taskInclude, toTaskDTO, type TaskDTO } from "@/lib/dto";
 import { cn, fmtDate } from "@/lib/utils";
 
@@ -48,6 +48,20 @@ export default async function HomePage() {
     include: taskInclude,
   });
   const tasks = rows.map((r) => forViewer(toTaskDTO(r), seeAll));
+  const inRevision = tasks.filter((t) => !isDone(t) && boardColumn(t) === "revision").length;
+  const [projects, favs] = await Promise.all([
+    seeAll
+      ? prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true } })
+      : prisma.brand.findMany({
+          where: { OR: [{ members: { some: { id: me.id } } }, { projects: { some: { archived: false, ...myTasksFilter(me.id) } } }] },
+          orderBy: { name: "asc" },
+          select: { id: true, name: true, color: true },
+        }),
+    prisma.brand.findMany({ where: { favoritedBy: { some: { id: me.id } } }, select: { id: true } }),
+  ]);
+  const favoriteProjects = projects.filter((b) => favs.some((f) => f.id === b.id));
+  const openByBrand = new Map<string, number>();
+  for (const t of tasks) if (t.brandId && !isDone(t)) openByBrand.set(t.brandId, (openByBrand.get(t.brandId) ?? 0) + 1);
   const active = tasks.filter((t) => !isDone(t));
   const withDelay = active.map((t) => ({ t, d: computeDelay(t) }));
   const editorLate = withDelay.filter((x) => x.d?.who === "EDITOR");
@@ -91,9 +105,32 @@ export default async function HomePage() {
           <Stat label={seeAll ? "Active projects" : "My active tasks"} value={active.length} />
           <Stat label="On track" value={onTrack} tone="green" />
           <Stat label={seeAll ? "Team delays" : "Late (on me)"} value={editorLate.length} tone={editorLate.length ? "red" : undefined} />
-          <Stat label="Waiting on brand" value={brandLate.length} tone={brandLate.length ? "amber" : undefined} />
+          <Stat label="In revision" value={inRevision} tone={inRevision ? "amber" : undefined} />
           {seeAll && <Stat label="Past client deadline" value={overdue.length} tone={overdue.length ? "red" : undefined} />}
         </div>
+
+        {/* Projects, like Asana's Home: favorites first, then the rest */}
+        <section className="mt-8">
+          <div className="mb-3 flex items-baseline justify-between">
+            <h2 className="text-[15px] font-semibold">{favoriteProjects.length ? "Favorite projects" : "Projects"}</h2>
+            <span className="text-[12px] text-muted">Star a project from its ⋯ menu in the sidebar</span>
+          </div>
+          <div className="grid grid-cols-3 gap-4 sm:grid-cols-4 lg:grid-cols-6">
+            {(favoriteProjects.length ? favoriteProjects : projects.slice(0, 11)).map((b) => (
+              <Link key={b.id} href={`/brands/${b.id}`} className="group flex flex-col items-center gap-2 text-center">
+                <span
+                  className="flex h-20 w-20 items-center justify-center rounded-2xl text-[26px] font-semibold text-white shadow-sm transition group-hover:scale-105"
+                  style={{ background: b.color }}
+                >
+                  {b.name.slice(0, 1).toUpperCase()}
+                </span>
+                <span className="line-clamp-2 text-[12px] leading-tight">{b.name}</span>
+                <span className="text-[11px] text-muted">{openByBrand.get(b.id) ?? 0} open</span>
+              </Link>
+            ))}
+            {projects.length === 0 && <p className="col-span-full text-[13px] text-muted">No projects yet. Click + next to “TBM Workspace” in the sidebar.</p>}
+          </div>
+        </section>
 
         <div className={cn("mt-8 grid gap-8", seeAll ? "lg:grid-cols-[1fr_1fr]" : "")}>
           <section>
@@ -111,7 +148,7 @@ export default async function HomePage() {
                 >
                   <span className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: t.brandColor ?? "#a2a0a2" }} />
                   <span className="min-w-0 flex-1 truncate">{t.title}</span>
-                  <span className="hidden text-[12px] text-muted sm:inline">{computeStage(t).label}</span>
+                  <span className="hidden text-[12px] text-muted sm:inline">{BOARD_COLUMNS.find((c) => c.key === boardColumn(t))?.label}</span>
                   {seeAll && t.assigneeName && <Avatar name={t.assigneeName} size={20} />}
                   <span className="w-14 text-right text-[12px] text-emerald-700">{fmtDate(t.internalDeadline)}</span>
                 </Link>
@@ -194,7 +231,7 @@ export default async function HomePage() {
                         </span>
                       </td>
                       <td className="px-2 text-right tabular-nums">{d.days}</td>
-                      <td className="px-3 text-[12px] text-muted">{computeStage(t).label}</td>
+                      <td className="px-3 text-[12px] text-muted">{BOARD_COLUMNS.find((c) => c.key === boardColumn(t))?.label}</td>
                     </tr>
                   ))}
                 </tbody>

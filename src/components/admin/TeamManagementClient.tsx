@@ -1,7 +1,7 @@
 "use client";
 
 import { KeyRound, Trash2, UserPlus } from "lucide-react";
-import { useState, useTransition } from "react";
+import { useEffect, useState, useTransition } from "react";
 import Avatar from "@/components/Avatar";
 import { createTeamUser, deleteTeamUser, setTeamUserPassword, updateTeamUser } from "@/lib/actions";
 import { DEPARTMENTS, ROLE_LABEL, ROLES } from "@/lib/constants";
@@ -69,6 +69,10 @@ function PasswordControl({ userId }: { userId: string }) {
 
 function AddForm() {
   const [open, setOpen] = useState(false);
+  // "Invite teammates" in the sidebar opens this form (/team?invite=1)
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("invite") === "1") setOpen(true);
+  }, []);
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [role, setRole] = useState("MEMBER");

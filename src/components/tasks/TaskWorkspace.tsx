@@ -30,6 +30,7 @@ type Props = {
   mode: "all" | "mine" | "brand" | "archive";
   fixedBrandId?: string;
   defaultGroupBy?: GroupBy;
+  showDoneDefault?: boolean;
 };
 
 const byDue = (a: TaskDTO, b: TaskDTO) => {
@@ -72,7 +73,7 @@ export default function TaskWorkspace(props: Props) {
   const [brandF, setBrandF] = useState("");
   const [personF, setPersonF] = useState("");
   const [prioF, setPrioF] = useState("");
-  const [showDone, setShowDone] = useState(mode === "archive");
+  const [showDone, setShowDone] = useState(mode === "archive" || !!props.showDoneDefault);
   const [toast, setToast] = useState<string | null>(null);
   const [, start] = useTransition();
 
@@ -195,6 +196,11 @@ export default function TaskWorkspace(props: Props) {
   const [newEnd, setNewEnd] = useState("");
   const [newPrio, setNewPrio] = useState("Medium");
   const [newCollabs, setNewCollabs] = useState<string[]>([]);
+  // Quick add from the top bar (+) opens the add form: /my-tasks?new=1
+  useEffect(() => {
+    if (search.get("new") === "1" && mode !== "archive") setAdding(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   function submitNew(e: React.FormEvent) {
     e.preventDefault();
@@ -230,7 +236,6 @@ export default function TaskWorkspace(props: Props) {
   const canCreate = mode !== "archive";
   const workspaceBrand = props.fixedBrandId || newBrand;
   const canAssign = viewer.seeAll || (!!workspaceBrand && viewer.brandIds.includes(workspaceBrand));
-  const statusField = !viewer.seeAll && viewer.department === "Creative" ? "scriptStage" : "editStatus";
 
   return (
     <div className="flex h-full min-h-0">
@@ -293,8 +298,7 @@ export default function TaskWorkspace(props: Props) {
           {view === "list" && (
             <select value={groupBy} onChange={(e) => setGroupBy(e.target.value as GroupBy)} className="field-input w-auto shrink-0 py-1">
               <option value="board">Group: Status</option>
-              <option value="stage">Group: Detailed stage</option>
-              {!props.fixedBrandId && <option value="brand">Group: Brand</option>}
+                            {!props.fixedBrandId && <option value="brand">Group: Brand</option>}
               {viewer.seeAll && <option value="assignee">Group: Assignee</option>}
               <option value="priority">Group: Priority</option>
               <option value="none">No grouping</option>
@@ -375,7 +379,6 @@ export default function TaskWorkspace(props: Props) {
                 <TaskCards
                   groups={groups}
                   viewer={viewer}
-                  statusField={statusField}
                   showAssignee={mode !== "mine"}
                   showBrand={!props.fixedBrandId}
                   selectedId={selectedId}
@@ -389,7 +392,6 @@ export default function TaskWorkspace(props: Props) {
                 people={people}
                 brands={brands}
                 viewer={viewer}
-                statusField={statusField}
                 showAssignee={mode !== "mine"}
                 showBrand={!props.fixedBrandId}
                 selectedId={selectedId}

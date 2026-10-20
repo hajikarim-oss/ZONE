@@ -3,11 +3,10 @@
 import { ChevronDown, ChevronRight, MessageSquare } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
-import { EDIT_STATUSES, SCRIPT_STAGES } from "@/lib/constants";
 import { isDone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { canEditField } from "@/lib/rbac";
-import { BrandChip, CellSelect, DelayBadge, DueText, opts, PriorityPill, StatusSelect } from "./bits";
+import { BrandChip, DelayBadge, DueText, PriorityPill, StatusSelect } from "./bits";
 import type { Group } from "./TaskList";
 
 // Phone version of the task list: one card per task, same groups, same
@@ -15,7 +14,6 @@ import type { Group } from "./TaskList";
 export default function TaskCards({
   groups,
   viewer,
-  statusField,
   showAssignee,
   showBrand,
   selectedId,
@@ -24,7 +22,6 @@ export default function TaskCards({
 }: {
   groups: Group[];
   viewer: { id: string; role: string; seeAll: boolean };
-  statusField: "editStatus" | "scriptStage";
   showAssignee: boolean;
   showBrand: boolean;
   selectedId: string | null;
@@ -32,7 +29,6 @@ export default function TaskCards({
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
-  const statusOptions = statusField === "scriptStage" ? SCRIPT_STAGES : EDIT_STATUSES;
 
   return (
     <div className="space-y-1 pb-6">
@@ -53,7 +49,7 @@ export default function TaskCards({
             <div className="space-y-2">
               {g.tasks.map((t) => {
                 const done = isDone(t);
-                const canStatus = canEditField(viewer, statusField, t);
+                const canStatus = canEditField(viewer, "editStatus", t);
                 return (
                   <div
                     key={t.id}
@@ -95,16 +91,6 @@ export default function TaskCards({
                       )}
                     </div>
 
-                    {canStatus && (
-                      <div className="mt-2 rounded-md border border-line" onClick={(e) => e.stopPropagation()}>
-                        <CellSelect
-                          value={t[statusField]}
-                          options={opts(statusOptions)}
-                          onChange={(v) => onUpdate(t.id, { [statusField]: v })}
-                          className="py-2"
-                        />
-                      </div>
-                    )}
                   </div>
                 );
               })}

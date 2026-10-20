@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Suspense } from "react";
 import TaskWorkspace from "@/components/tasks/TaskWorkspace";
+import FavoriteButton from "@/components/tasks/FavoriteButton";
 import WorkspaceMembers from "@/components/tasks/WorkspaceMembers";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -14,7 +15,10 @@ export default async function BrandPage({ params }: { params: Promise<{ id: stri
   const me = await requireTeamPage();
   const brand = await prisma.brand.findUnique({
     where: { id },
-    include: { members: { select: { id: true, name: true }, orderBy: { name: "asc" } } },
+    include: {
+      members: { select: { id: true, name: true }, orderBy: { name: "asc" } },
+      favoritedBy: { where: { id: me.id }, select: { id: true } },
+    },
   });
   if (!brand) notFound();
   const data = await loadWorkspace(me, { brandId: id, archived: false });
@@ -30,6 +34,8 @@ export default async function BrandPage({ params }: { params: Promise<{ id: stri
         fixedBrandId={brand.id}
         defaultGroupBy="board"
         headerExtra={
+          <div className="flex items-center gap-2">
+          <FavoriteButton brandId={brand.id} initial={brand.favoritedBy.length > 0} />
           <WorkspaceMembers
             brandId={brand.id}
             members={brand.members}
@@ -38,6 +44,7 @@ export default async function BrandPage({ params }: { params: Promise<{ id: stri
             canAdd={seeAll || isMember}
             canRemoveOthers={seeAll}
           />
+          </div>
         }
         {...data}
       />

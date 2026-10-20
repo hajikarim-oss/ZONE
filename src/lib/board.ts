@@ -30,9 +30,10 @@ export function dropPatch(t: TaskDTO, to: BoardKey): Record<string, unknown> | n
   }
   if (to === "revision") {
     reopen();
-    const sentToBrand = t.editStatus === "First Cut Sent" || t.editStatus === "In Review";
-    const round = Math.min(4, Math.max(1, t.revisionRound + (sentToBrand ? 1 : 0)));
-    patch.editStatus = sentToBrand ? `External Revision R${round}` : "Internal Revision R1";
+    // Each move into Revision is a new round (R1…R4); admins hear at round 3.
+    const round = Math.min(4, t.revisionRound + 1);
+    patch.editStatus = `External Revision R${round}`;
+    patch.revisionRound = round;
     if (t.finalApproval === "Approved") patch.finalApproval = "Pending";
   }
   if (to === "completed") {

@@ -1,4 +1,6 @@
+import { Suspense } from "react";
 import Sidebar from "@/components/Sidebar";
+import TopBar from "@/components/TopBar";
 import Tour from "@/components/Tour";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
@@ -8,7 +10,7 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const me = await requireTeamPage();
   const seeAll = canSeeAll(me);
 
-  const [unread, brands, myOpen] = await Promise.all([
+  const [unread, brands, myOpen, favorites, team, teamCount] = await Promise.all([
     prisma.notification.count({ where: { userId: me.id, read: false } }),
     seeAll
       ? prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true } })
@@ -21,6 +23,9 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     prisma.project.count({
       where: { assigneeId: me.id, archived: false, deliveryStatus: { notIn: ["Files Sent", "Invoice Raised", "Project Closed"] } },
     }),
+    prisma.brand.findMany({ where: { favoritedBy: { some: { id: me.id } } }, select: { id: true } }),
+    prisma.user.findMany({ where: { active: true }, orderBy: { createdAt: "asc" }, take: 5, select: { id: true, name: true } }),
+    prisma.user.count({ where: { active: true } }),
   ]);
 
   return (
@@ -34,8 +39,16 @@ export default async function AppLayout({ children }: { children: React.ReactNod
         unread={unread}
         myOpen={myOpen}
         brands={brands}
+        favoriteIds={favorites.map((f) => f.id)}
+        team={team}
+        teamCount={teamCount}
       />
-      <main className="flex h-dvh min-w-0 flex-1 flex-col overflow-hidden bg-surface pt-14 md:pt-0">{children}</main>
+      <main className="flex h-dvh min-w-0 flex-1 flex-col overflow-hidden bg-surface pt-14 md:pt-0">
+        <Suspense>
+          <TopBar name={me.name} email={me.email} role={me.role} />
+        </Suspense>
+        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
+      </main>
       <Tour userId={me.id} name={me.name} role={me.role} />
     </div>
   );

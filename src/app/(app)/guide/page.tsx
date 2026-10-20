@@ -3,7 +3,7 @@ import { canSeeAll, isAdmin } from "@/lib/rbac";
 import {
   ARCHIVE_AFTER_DAYS, BRAND_NUDGE_DAYS, DEADLINE_ALERT_DAYS, ESCALATE_AFTER, REVISION_ALERT_ROUND, STALE_DAYS,
 } from "@/lib/constants";
-import { STAGE_GROUPS } from "@/lib/status";
+import { BOARD_COLUMNS } from "@/lib/status";
 import TourButton from "./tour-button";
 
 // Written guide to the panel: how the work flows, what each status means,
@@ -46,10 +46,10 @@ export default async function GuidePage() {
     ["start", "Getting started"],
     ["roles", "Who sees what"],
     ["day", "Your daily routine"],
-    ["flow", "The workflow & statuses"],
+    ["flow", "Status"],
     ["stages", "Stages, late tags & deadlines"],
     ["updates", "Comments, collaborators & history"],
-    ["notifications", "Notifications & emails"],
+    ["notifications", "Inbox & emails"],
     ...(seeAll ? ([["managing", "Managing projects"]] as [string, string][]) : []),
     ...(admin ? ([["admin", "Admin: team, brands & automations"]] as [string, string][]) : []),
     ["clients", "What brands see"],
@@ -84,7 +84,8 @@ export default async function GuidePage() {
             </p>
             <ul className="list-disc space-y-1 pl-5">
               <li><b>Sign in</b> with your TBM Google account (freelancers: the Gmail your lead added). An admin has to add you on the Team page first.</li>
-              <li>The <b>sidebar</b> has Home, My tasks, Notifications{seeAll ? ", All projects" : ""}, your brands{seeAll ? ", the Manage section" : ""} and this guide.</li>
+              <li>The <b>sidebar</b> works like Asana: Home, My tasks, Inbox{seeAll ? ", Portfolios" : ""}, Goals{seeAll ? ", All projects" : ""}; <b>Favorites</b> (star a project from its ⋯ menu); <b>Saved searches</b> (Due this week, Overdue, In revision…); and <b>TBM Workspace</b> with every project. Click <b>+</b> next to TBM Workspace to start a new project. The ☰ button hides the sidebar.</li>
+              <li>The <b>top bar</b> has Search (press <b>/</b>), the <b>+</b> quick-add button and your profile menu.</li>
               <li>Switch <b>light / dark mode</b> with the moon / sun button at the bottom of the sidebar.</li>
             </ul>
           </Section>
@@ -105,8 +106,8 @@ export default async function GuidePage() {
           <Section id="day" title="3. Your daily routine">
             <ol className="list-decimal space-y-1.5 pl-5">
               <li>Open <b>Home</b>: check what's due in the next 7 days and anything tagged late.</li>
-              <li>Check <b>Notifications</b> (the purple number in the sidebar) for new assignments.</li>
-              <li>Open <b>My tasks</b>. For every task you touched today, move the <b>Edit status</b> forward (right in the row, or in the task panel).</li>
+              <li>Check your <b>Inbox</b> (the purple number in the sidebar) for new assignments.</li>
+              <li>Open <b>My tasks</b>. For every task you touched today, update the <b>Status</b> (right in the row, on the Board, or in the task panel) and tick off subtasks.</li>
               <li>Post a short <b>comment</b> or Drive link in the task panel when you share a cut, render, or hit a blocker. @mention whoever needs to know.</li>
               <li>Doing something that isn't on the panel yet? <b>Add task</b> in My tasks so it's tracked.</li>
               {seeAll && <li>Managers: scan <b>All projects</b> grouped by brand, and the <b>Delay tracker</b> on Home, every morning.</li>}
@@ -117,29 +118,24 @@ export default async function GuidePage() {
             </p>
           </Section>
 
-          <Section id="flow" title="4. The workflow & statuses">
-            <p>Each task has a pipeline. These are the dropdowns in the task panel, in order:</p>
+          <Section id="flow" title="4. Status">
+            <p>Every task has one <b>Status</b>, the same in the list, on the board, on phone and in the task panel:</p>
             <Table
-              head={["Step", "Options", "Notes"]}
-              rows={[
-                ["Brief", "Not Started → Brief Received → Brief Call Done", ""],
-                ["Concept / script", "Not Started → In Progress → Sent to Client → Approved", "Creative team members update this one; it's the status column in their list."],
-                ["Pre-pro", "Not Started → In Progress → Complete", ""],
-                ["Shoot", "Not Started → Scheduled → Done → Footage Received", "Footage Received means editing can start."],
-                ["Edit status", "Not Started → In Progress → First Cut Ready → First Cut Sent → In Review → Internal Revision R1–R4 / External Revision R1–R4 → Final Approved", "The main status editors update."],
-                ["Revision round", "0–4", "Set automatically by External Revision Rn; can also be set by hand."],
-                ["Client review", "Pending / Received / NA", ""],
-                ["Final approval", "Pending / Approved / NA", "Set to Approved automatically when Edit status becomes Final Approved."],
-                ["Delivery", "Not Started → Files Sent → Invoice Raised → Project Closed", "Files Sent = delivered. Project Closed = done; it moves to Completed after 30 days."],
-              ]}
+              head={["Status", "Means"]}
+              rows={BOARD_COLUMNS.map((c) => [c.label, c.hint])}
             />
-            <p><b>Internal revision</b> = changes asked for by TBM before the brand sees it. <b>External revision</b> = changes asked for by the brand.</p>
+            <ul className="list-disc space-y-1 pl-5">
+              <li>Change it from the <b>Status</b> dropdown, by dragging the card on the <b>Board</b>, or with <b>Mark complete</b> (the tick circle in the list, or the button at the top of the task panel).</li>
+              <li><b>Revision</b> counts rounds automatically: each time a task goes back into Revision the round goes up, and admins are told at round {REVISION_ALERT_ROUND}.</li>
+              <li><b>On hold</b> pauses late tags and reminders.</li>
+              <li>Reopening a completed task (unticking it, or moving it to another status) puts it back in progress.</li>
+            </ul>
           </Section>
 
           <Section id="stages" title="5. Stages, late tags & deadlines">
-            <p>The coloured <b>Stage</b> on every task is worked out from the statuses above, so you never set it by hand:</p>
+            <p>The five statuses and their colours:</p>
             <div className="flex flex-wrap gap-1.5">
-              {STAGE_GROUPS.map((g) => (
+              {BOARD_COLUMNS.map((g) => (
                 <span key={g.key} className="inline-flex items-center gap-1.5 rounded-full px-2 py-0.5 text-[12px]" style={{ background: g.dot + "2b" }}>
                   <span className="h-1.5 w-1.5 rounded-full" style={{ background: g.dot }} />
                   {g.label}
@@ -180,9 +176,9 @@ export default async function GuidePage() {
             </ul>
           </Section>
 
-          <Section id="notifications" title="7. Notifications & emails">
+          <Section id="notifications" title="7. Inbox & emails">
             <p>
-              <b>In-app:</b> the purple number next to <b>Notifications</b> is your unread count. It updates by itself every 30 seconds.
+              <b>In-app:</b> the purple number next to <b>Inbox</b> is your unread count. It updates by itself every 30 seconds.
               Click a notification to open the task (it's then marked read), or use <b>Mark all as read</b>.
             </p>
             <p className="font-medium">Instant (the moment something changes):</p>
@@ -190,7 +186,6 @@ export default async function GuidePage() {
               head={["When", "Who's told", "How"]}
               rows={[
                 ["A task is assigned to someone", "The assignee", "Notification + email with brief, brand, priority and deadline"],
-                ["Edit status → First Cut Sent", "Brand client logins; the brand's TBM POC", "Email to the brand; notification to the POC"],
                 [`Revision round reaches ${REVISION_ALERT_ROUND}`, "Admins", "Notification + email"],
                 ["Final approval → Approved", "Admins", "Notification (ready to deliver)"],
                 ["Delivery → Project Closed", "Admins + assignee", "Notification 🎉"],
@@ -264,6 +259,8 @@ export default async function GuidePage() {
             <div className="space-y-3">
               <p><b>I can't change a field.</b> On tasks assigned to you, you can change status, revision round, shoot status and On hold. On tasks you added you can also change the name, brand, deadline and priority. Ask your lead for anything else.</p>
               <p><b>A task is missing from My tasks.</b> It may not be assigned to you yet, or it's delivered / closed; tick "Show delivered &amp; closed" (on the Board, it's in the Completed column).</p>
+              <p><b>What are Portfolios and Goals?</b> Portfolios (admins / managers) shows every project with its progress, health and late tasks. Goals lists what the team is aiming for, each with an owner, due date and progress; managers add goals, and the owner updates the progress.</p>
+              <p><b>What are Saved searches?</b> Ready-made filters in the sidebar: Due this week, Overdue, In revision, On hold, Completed this week, Tasks I added{seeAll ? ", Unassigned" : ""}.</p>
               <p><b>What is a brand workspace?</b> Each brand page (e.g. Unseen Man) is a workspace with its own board. Members (the people shown at the top right) see every task in it, can add tasks for anyone, and can add teammates. Tasks assigned to you there also show in your My tasks.</p>
               <p><b>How do I join a workspace?</b> Ask an admin or any member to add you from the members button at the top right of the brand page.</p>
               {admin && <p><b>Setting up the Google Drive button (admin, once):</b> in Google Cloud (same project as the Google sign-in) enable the <b>Google Picker API</b> and <b>Google Drive API</b>, create an <b>API key</b>, add your panel addresses under the OAuth client's "Authorised JavaScript origins", then add <code>NEXT_PUBLIC_GOOGLE_CLIENT_ID</code> and <code>NEXT_PUBLIC_GOOGLE_API_KEY</code> in Vercel and .env. Until then, people can paste links.</p>}
@@ -271,7 +268,7 @@ export default async function GuidePage() {
               <p><b>Who can see a task I added?</b> You, any collaborators you add, and admins / managers. Other team members can't.</p>
               <p><b>How do I share a task with a teammate?</b> Add them under <b>Collaborators</b> in the task panel, or @mention them in a comment.</p>
               <p><b>What do the Board columns mean?</b> Upcoming = brief, script, pre-pro or shoot; Ongoing = editing, with the brand for review, or approved; Revision = internal or external revisions; On hold = paused; Completed = delivered or closed.</p>
-              <p><b>What happens when I drag a card?</b> The status changes to match the column: Ongoing sets Edit status to In Progress, Revision starts the next revision round, Completed marks it Final Approved and Files Sent. You can fine-tune it in the task panel.</p>
+              <p><b>What happens when I drag a card?</b> The task's Status changes to that column everywhere (list, board, phone, client tracker). Moving into Revision starts the next revision round.</p>
               <p><b>Does On hold stop reminders?</b> Yes. On-hold tasks get no late tags, no stale reminders and no deadline alerts.</p>
               <p><b>Who sees my comments?</b> Everyone on the team who can see the task. Brand clients never see comments.</p>
               <p><b>I mentioned someone but they didn't get it.</b> Pick their name from the list that appears after typing @ so the full name is used.</p>

@@ -1,14 +1,14 @@
 "use client";
 
-import { CheckSquare, ChevronDown, ChevronRight, MessageSquare, Paperclip } from "lucide-react";
+import { Check, CheckSquare, ChevronDown, ChevronRight, MessageSquare, Paperclip } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import type { BrandDTO, PersonDTO, TaskDTO } from "@/lib/dto";
-import { EDIT_STATUSES, PRIORITIES, REVISION_ROUNDS, SCRIPT_STAGES } from "@/lib/constants";
+import { dropPatch } from "@/lib/board";
 import { isDone } from "@/lib/status";
 import { cn } from "@/lib/utils";
 import { canEditField } from "@/lib/rbac";
-import { BrandChip, CellSelect, DelayBadge, DueText, opts, PriorityPill, StatusSelect } from "./bits";
+import { BrandChip, CellSelect, DelayBadge, DueText, StatusSelect } from "./bits";
 
 export type Group = { key: string; label: string; color?: string; tasks: TaskDTO[] };
 
@@ -17,7 +17,6 @@ type Props = {
   people: PersonDTO[];
   brands: BrandDTO[];
   viewer: { id: string; role: string; seeAll: boolean };
-  statusField: "editStatus" | "scriptStage";
   showAssignee: boolean;
   showBrand: boolean;
   selectedId: string | null;
@@ -28,40 +27,30 @@ type Props = {
 // Asana-style list: one quiet row per task, inline dropdowns, collapsible
 // sections. Grid template keeps columns aligned across sections.
 export default function TaskList(p: Props) {
-  const seeAll = p.viewer.seeAll;
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  // Asana-style: Task name · Due date · Status (+ Assignee / Brand where useful)
   const cols = [
     "minmax(280px,1fr)",
-    p.showAssignee ? "150px" : null,
-    p.showBrand ? "130px" : null,
-    "96px",
-    seeAll ? "96px" : null,
-    "96px",
-    "140px",
-    "170px",
-    "64px",
+    "110px",
+    "150px",
+    p.showAssignee ? "160px" : null,
+    p.showBrand ? "140px" : null,
   ].filter(Boolean).join(" ");
 
   const editable = (t: TaskDTO, field: string) => canEditField(p.viewer, field, t);
 
-  const statusOptions = p.statusField === "scriptStage" ? SCRIPT_STAGES : EDIT_STATUSES;
-
   return (
-    <div className="min-w-[1000px]">
+    <div className="min-w-[640px]">
       {/* header */}
       <div
         className="sticky top-0 z-10 grid border-b border-line bg-surface text-[12px] font-medium text-muted"
         style={{ gridTemplateColumns: cols }}
       >
         <div className="py-2 pl-8">Task name</div>
-        {p.showAssignee && <div className="border-l border-line px-2 py-2">Assignee</div>}
-        {p.showBrand && <div className="border-l border-line px-2 py-2">Brand</div>}
-        <div className="border-l border-line px-2 py-2">Due</div>
-        {seeAll && <div className="border-l border-line px-2 py-2">Client due</div>}
-        <div className="border-l border-line px-2 py-2">Priority</div>
+        <div className="border-l border-line px-2 py-2">Due date</div>
         <div className="border-l border-line px-2 py-2">Status</div>
-        <div className="border-l border-line px-2 py-2">{p.statusField === "scriptStage" ? "Script status" : "Edit status"}</div>
-        <div className="border-l border-line px-2 py-2">Rev</div>
+        {p.showAssignee && <div className="border-l border-line px-2 py-2">Assignee</div>}
+        {p.showBrand && <div className="border-l border-line px-2 py-2">Project</div>}
       </div>
 
       {p.groups.map((g) => {
@@ -94,8 +83,21 @@ export default function TaskList(p: Props) {
                     style={{ gridTemplateColumns: cols }}
                   >
                     <div className="flex min-w-0 items-center gap-2 py-1.5 pl-8 pr-2">
-                      <span className={cn("h-3.5 w-3.5 shrink-0 rounded-full border", done ? "border-emerald-500 bg-emerald-500" : "border-muted/50")} />
-                      <span className="shrink-0 text-[11px] text-muted">{t.code}</span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (!editable(t, "editStatus")) return;
+                          const patch = dropPatch(t, done ? "ongoing" : "completed");
+                          if (patch) p.onUpdate(t.id, patch);
+                        }}
+                        className={cn(
+                          "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition",
+                          done ? "border-emerald-500 bg-emerald-500 text-white" : "border-muted/50 text-transparent hover:border-emerald-500 hover:text-emerald-500",
+                        )}
+                        title={done ? "Reopen" : "Mark complete"}
+                      >
+                        <Check className="h-2.5 w-2.5" />
+                      </button>
                       <span className={cn("truncate", done && "text-muted line-through decoration-muted/40")}>{t.title}</span>
                       <DelayBadge t={t} />
                       {t.subtaskCount > 0 && (
@@ -120,6 +122,8 @@ export default function TaskList(p: Props) {
                         <span className="shrink-0 rounded bg-canvas px-1.5 py-0.5 text-[10px] font-medium text-muted">Collaborator</span>
                       )}
                     </div>
+                    <div className="px-2"><DueText date={t.internalDeadline} done={done} /></div>
+                    <div className="min-w-0 px-2"><StatusSelect t={t} disabled={!editable(t, "editStatus")} onUpdate={p.onUpdate} /></div>
                     {p.showAssignee && (
                       <div className="flex min-w-0 items-center gap-1.5 px-1">
                         {t.assigneeName && <Avatar name={t.assigneeName} size={20} />}
@@ -144,32 +148,6 @@ export default function TaskList(p: Props) {
                         )}
                       </div>
                     )}
-                    <div className="px-2"><DueText date={t.internalDeadline} done={done} /></div>
-                    {seeAll && <div className="px-2"><DueText date={t.externalDeadline} done={done} /></div>}
-                    <div className="px-1">
-                      {editable(t, "priority") ? (
-                        <CellSelect value={t.priority} options={opts(PRIORITIES)} onChange={(v) => p.onUpdate(t.id, { priority: v })} />
-                      ) : (
-                        <div className="px-2"><PriorityPill value={t.priority} /></div>
-                      )}
-                    </div>
-                    <div className="min-w-0 px-2"><StatusSelect t={t} disabled={!editable(t, "editStatus")} onUpdate={p.onUpdate} /></div>
-                    <div className="min-w-0 px-1">
-                      <CellSelect
-                        value={t[p.statusField]}
-                        disabled={!editable(t, p.statusField)}
-                        options={opts(statusOptions)}
-                        onChange={(v) => p.onUpdate(t.id, { [p.statusField]: v })}
-                      />
-                    </div>
-                    <div className="px-1">
-                      <CellSelect
-                        value={String(t.revisionRound)}
-                        disabled={!editable(t, "revisionRound")}
-                        options={opts(REVISION_ROUNDS)}
-                        onChange={(v) => p.onUpdate(t.id, { revisionRound: Number(v) })}
-                      />
-                    </div>
                   </div>
                 );
               })}
