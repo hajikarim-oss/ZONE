@@ -10,15 +10,28 @@ export default async function AppLayout({ children }: { children: React.ReactNod
   const me = await requireTeamPage();
   const seeAll = canSeeAll(me);
 
-  const [unread, brands, myOpen, favorites, team, teamCount] = await Promise.all([
+  const [unread, brands, myOpen, favorites, team, teamCount, allPeople] = await Promise.all([
     prisma.notification.count({ where: { userId: me.id, read: false } }),
     seeAll
-      ? prisma.brand.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true, color: true } })
+      ? prisma.brand.findMany({
+          orderBy: { name: "asc" },
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            campaigns: { orderBy: { name: "asc" }, select: { id: true, name: true } },
+          },
+        })
       : prisma.brand.findMany({
           // Brand workspaces they're a member of, plus brands of their own tasks
           where: { OR: [{ members: { some: { id: me.id } } }, { projects: { some: { archived: false, ...myTasksFilter(me.id) } } }] },
           orderBy: { name: "asc" },
-          select: { id: true, name: true, color: true },
+          select: {
+            id: true,
+            name: true,
+            color: true,
+            campaigns: { orderBy: { name: "asc" }, select: { id: true, name: true } },
+          },
         }),
     prisma.project.count({
       where: { assigneeId: me.id, archived: false, deliveryStatus: { notIn: ["Files Sent", "Invoice Raised", "Project Closed"] } },
@@ -26,29 +39,44 @@ export default async function AppLayout({ children }: { children: React.ReactNod
     prisma.brand.findMany({ where: { favoritedBy: { some: { id: me.id } } }, select: { id: true } }),
     prisma.user.findMany({ where: { active: true }, orderBy: { createdAt: "asc" }, take: 5, select: { id: true, name: true } }),
     prisma.user.count({ where: { active: true } }),
+    prisma.user.findMany({ where: { active: true }, select: { id: true, name: true, email: true, department: true, active: true }, orderBy: { name: "asc" } }),
   ]);
 
   return (
-    <div className="flex h-dvh overflow-hidden">
-      <Sidebar
-        name={me.name}
-        email={me.email}
-        role={me.role}
-        seeAll={seeAll}
-        admin={isAdmin(me)}
-        unread={unread}
-        myOpen={myOpen}
-        brands={brands}
-        favoriteIds={favorites.map((f) => f.id)}
-        team={team}
-        teamCount={teamCount}
-      />
-      <main className="flex h-dvh min-w-0 flex-1 flex-col overflow-hidden bg-surface pt-14 md:pt-0">
-        <Suspense>
-          <TopBar name={me.name} email={me.email} role={me.role} />
+    <div className="fixed inset-0 flex flex-col bg-[#FAF9F5] dark:bg-[#0B0E14] overflow-hidden">
+      <Suspense>
+        <TopBar
+          name={me.name}
+          email={me.email}
+          role={me.role}
+          unreadCount={unread}
+          brands={brands as any}
+          people={allPeople as any}
+        />
+      </Suspense>
+
+      <div className="flex-1 flex min-h-0">
+        <Suspense fallback={<div className="hidden w-64 border-r border-stone-200/90 bg-[#FAF9F5] md:block" />}>
+          <Sidebar
+            name={me.name}
+            email={me.email}
+            role={me.role}
+            seeAll={seeAll}
+            admin={isAdmin(me)}
+            unread={unread}
+            myOpen={myOpen}
+            brands={brands}
+            favoriteIds={favorites.map((f) => f.id)}
+            team={team}
+            teamCount={teamCount}
+          />
         </Suspense>
-        <div className="flex min-h-0 flex-1 flex-col overflow-hidden">{children}</div>
-      </main>
+
+        <main className="flex-1 min-w-0 bg-white overflow-hidden border-t border-stone-200/90 md:rounded-tl-2xl md:border-l dark:bg-[#0F141C] dark:border-[#2C3B53] flex flex-col shadow-xs">
+          <div className="flex-1 min-h-0 overflow-auto">{children}</div>
+        </main>
+      </div>
+
       <Tour userId={me.id} name={me.name} role={me.role} />
     </div>
   );

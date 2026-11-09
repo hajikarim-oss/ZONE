@@ -1,13 +1,17 @@
 import Link from "next/link";
 import { redirect } from "next/navigation";
+import { Clock, DollarSign, Film, Sparkles, FolderGit2, Kanban, ExternalLink, Briefcase, Layers } from "lucide-react";
 import Avatar from "@/components/Avatar";
+import { JiraStatusLozenge, JiraEpicPill } from "@/components/jira/JiraBits";
+import { Page, PageTopbar, StatStrip, Stat, SectionBar, TopbarAction, PageBody } from "@/components/layout/Page";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
 import { canSeeAll } from "@/lib/rbac";
 import { BOARD_COLUMNS, boardColumn, computeDelay, isDone } from "@/lib/status";
-import { fmtDate } from "@/lib/utils";
+import { fmtDate, cn } from "@/lib/utils";
 
-// Portfolios (like Asana): every project / brand at a glance, with progress.
+// Studio Portfolios & Campaign Plans (Email-System / Brae inspired):
+// Every Brand and Campaign at a glance, with progress bars, tracked hours, and cost metrics.
 export default async function PortfoliosPage() {
   const me = await requireTeamPage();
   if (!canSeeAll(me)) redirect("/home");
@@ -16,11 +20,26 @@ export default async function PortfoliosPage() {
     orderBy: { name: "asc" },
     include: {
       members: { select: { id: true, name: true } },
+      campaigns: { select: { id: true, name: true, internalDeadline: true } },
       projects: {
         where: { archived: false },
         select: {
-          id: true, briefStage: true, scriptStage: true, preProStage: true, shootStatus: true, editStatus: true, revisionRound: true,
-          finalApproval: true, deliveryStatus: true, externalDeadline: true, internalDeadline: true, onHold: true,
+          id: true,
+          briefStage: true,
+          scriptStage: true,
+          preProStage: true,
+          shootStatus: true,
+          editStatus: true,
+          revisionRound: true,
+          finalApproval: true,
+          deliveryStatus: true,
+          externalDeadline: true,
+          internalDeadline: true,
+          onHold: true,
+          cost: true,
+          timeEntries: {
+            select: { durationMinutes: true, hourlyRate: true },
+          },
         },
       },
     },
@@ -28,85 +47,214 @@ export default async function PortfoliosPage() {
 
   const rows = brands.map((b) => {
     const total = b.projects.length;
-    const done = b.projects.filter((p) => isDone(p)).length;
-    const cols = Object.fromEntries(BOARD_COLUMNS.map((c) => [c.key, b.projects.filter((p) => boardColumn(p) === c.key).length]));
-    const late = b.projects.filter((p) => computeDelay(p)).length;
+    const done = b.projects.filter((p) => isDone(p as any)).length;
+    const inProgress = b.projects.filter((p) => {
+      const c = boardColumn(p as any);
+      return c === "ongoing" || c === "approval" || c === "revision";
+    }).length;
+    const todo = total - done - inProgress;
+    const late = b.projects.filter((p) => computeDelay(p as any)).length;
     const nextDue = b.projects
-      .filter((p) => !isDone(p) && p.internalDeadline)
+      .filter((p) => !isDone(p as any) && p.internalDeadline)
       .map((p) => p.internalDeadline!)
       .sort((a, c) => a.getTime() - c.getTime())[0];
     const health = late === 0 ? "On track" : late <= 2 ? "At risk" : "Off track";
-    return { b, total, done, cols, late, nextDue, health };
+
+    const totalMinutes = b.projects.reduce((acc, p) => {
+      const fromEntries = (p.timeEntries || []).reduce((sum, te) => sum + te.durationMinutes, 0);
+      return acc + fromEntries;
+    }, 0);
+    const totalHours = Math.round((totalMinutes / 60) * 10) / 10;
+
+    const totalCost = b.projects.reduce((acc, p) => {
+      const entryCost = (p.timeEntries || []).reduce((sum, te) => sum + (te.durationMinutes / 60) * (te.hourlyRate || 0), 0);
+      return acc + (p.cost != null ? p.cost : entryCost);
+    }, 0);
+
+    return { b, total, done, inProgress, todo, late, nextDue, health, totalHours, totalCost: Math.round(totalCost) };
   });
 
-  const tone: Record<string, string> = {
-    "On track": "bg-emerald-50 text-emerald-700",
-    "At risk": "bg-amber-50 text-amber-700",
-    "Off track": "bg-rose-50 text-rose-700",
-  };
+  const overallHours = Math.round(rows.reduce((sum, r) => sum + r.totalHours, 0) * 10) / 10;
+  const overallCost = rows.reduce((sum, r) => sum + r.totalCost, 0);
+  const overallProjects = rows.reduce((sum, r) => sum + r.total, 0);
 
   return (
-    <div className="scroll-thin h-full overflow-y-auto">
-      <div className="mx-auto max-w-6xl px-4 py-5 md:px-8 md:py-8">
-        <h1 className="text-[24px] font-semibold tracking-tight">Portfolios</h1>
-        <p className="mt-1 text-[13px] text-muted">Every project at a glance: progress, status and what&apos;s late.</p>
+    <Page>
+      {/* Editorial Topbar */}
+      <PageTopbar
+        eyebrow="Studio Portfolios"
+        subtitle="Campaign progress, tracked editing hours, and production cost rollup"
+      >
+        <TopbarAction
+          variant="primary"
+          href="/projects"
+          icon={<Kanban className="size-3.5" />}
+        >
+          All Deliverables
+        </TopbarAction>
+      </PageTopbar>
 
-        <div className="mt-6 overflow-x-auto rounded-lg border border-line">
-          <table className="w-full min-w-[860px] text-[13px]">
-            <thead className="bg-canvas text-left text-[12px] text-muted">
-              <tr>
-                <th className="px-3 py-2 font-medium">Project</th>
-                <th className="px-3 py-2 font-medium">Health</th>
-                <th className="px-3 py-2 font-medium">Progress</th>
-                {BOARD_COLUMNS.filter((c) => c.key !== "completed").map((c) => (
-                  <th key={c.key} className="px-2 py-2 text-center font-medium">{c.label}</th>
-                ))}
-                <th className="px-2 py-2 text-center font-medium">Late</th>
-                <th className="px-3 py-2 font-medium">Next due</th>
-                <th className="px-3 py-2 font-medium">Members</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.length === 0 && (
-                <tr><td colSpan={10} className="px-3 py-8 text-center text-muted">No projects yet.</td></tr>
-              )}
-              {rows.map(({ b, total, done, cols, late, nextDue, health }) => (
-                <tr key={b.id} className="border-t border-line/70 hover:bg-canvas">
-                  <td className="px-3 py-2.5">
-                    <Link href={`/brands/${b.id}`} className="flex items-center gap-2 font-medium hover:text-accent">
-                      <span className="h-3 w-3 rounded-[3px]" style={{ background: b.color }} />
-                      {b.name}
-                    </Link>
-                  </td>
-                  <td className="px-3"><span className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${tone[health]}`}>{total ? health : "—"}</span></td>
-                  <td className="px-3">
-                    <div className="flex items-center gap-2">
-                      <div className="h-1.5 w-24 overflow-hidden rounded-full bg-canvas">
-                        <div className="h-full rounded-full bg-emerald-500" style={{ width: `${total ? Math.round((done / total) * 100) : 0}%` }} />
-                      </div>
-                      <span className="text-[11px] text-muted">{done}/{total}</span>
-                    </div>
-                  </td>
-                  {BOARD_COLUMNS.filter((c) => c.key !== "completed").map((c) => (
-                    <td key={c.key} className="px-2 text-center text-muted">{cols[c.key] || ""}</td>
-                  ))}
-                  <td className={`px-2 text-center ${late ? "font-semibold text-rose-600" : "text-muted"}`}>{late || ""}</td>
-                  <td className="px-3 text-muted">{nextDue ? fmtDate(nextDue) : "—"}</td>
-                  <td className="px-3">
-                    <div className="flex -space-x-1.5">
-                      {b.members.slice(0, 4).map((m) => (
-                        <span key={m.id} className="rounded-full ring-2 ring-surface" title={m.name}><Avatar name={m.name} size={22} /></span>
-                      ))}
-                      {b.members.length > 4 && <span className="pl-2 text-[11px] text-muted">+{b.members.length - 4}</span>}
-                    </div>
-                  </td>
+      {/* Edge-to-edge StatStrip */}
+      <StatStrip cols={4}>
+        <Stat
+          label="Active Brands"
+          value={brands.length}
+          sub="Client accounts"
+        />
+        <Stat
+          label="Total Deliverables"
+          value={overallProjects}
+          sub="Videos & reels in pipeline"
+        />
+        <Stat
+          label="Total Tracked Hours"
+          value={`${overallHours}h`}
+          sub="Time entries logged"
+          tone="blue"
+        />
+        <Stat
+          label="Total Production Cost"
+          value={`₹${overallCost.toLocaleString("en-IN")}`}
+          sub="Spend and payouts"
+          tone="green"
+          last
+        />
+      </StatStrip>
+
+      {/* Page Body */}
+      <PageBody className="p-5 md:p-6">
+        <div className="overflow-hidden rounded-xl border border-stone-200/90 bg-white shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22]">
+          <SectionBar label="PORTFOLIO ROADMAP MATRIX" count={`${rows.length} brands`} />
+
+          <div className="overflow-x-auto">
+            <table className="w-full text-left text-[12.5px]">
+              <thead className="border-b border-stone-100 bg-[#FAF9F5]/40 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400 dark:border-[#2C3B53] dark:bg-[#0F141C]">
+                <tr>
+                  <th className="px-4 py-2.5">Brand Project</th>
+                  <th className="px-3 py-2.5">Campaigns</th>
+                  <th className="px-3 py-2.5">Deliverable Progress</th>
+                  <th className="px-3 py-2.5 text-right">Hours Logged</th>
+                  <th className="px-3 py-2.5 text-right">Production Cost</th>
+                  <th className="px-3 py-2.5">Health</th>
+                  <th className="px-3 py-2.5">Next Due</th>
+                  <th className="px-4 py-2.5 text-right">Action</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-stone-100 dark:divide-[#2C3B53]">
+                {rows.map(({ b, total, done, inProgress, todo, late, nextDue, health, totalHours, totalCost }) => {
+                  const pct = total === 0 ? 0 : Math.round((done / total) * 100);
+
+                  return (
+                    <tr key={b.id} className="hover:bg-slate-50 dark:hover:bg-[#0F141C] transition">
+                      {/* Project Name */}
+                      <td className="px-4 py-3">
+                        <div className="flex items-center gap-2.5">
+                          <span
+                            className="flex size-7 shrink-0 items-center justify-center rounded-[4px] text-[12px] font-bold text-white shadow-2xs"
+                            style={{ backgroundColor: b.color }}
+                          >
+                            {b.name.slice(0, 1).toUpperCase()}
+                          </span>
+                          <div>
+                            <Link
+                              href={`/brands/${b.id}`}
+                              className="font-bold text-slate-950 hover:text-blue-600 hover:underline dark:text-white"
+                            >
+                              {b.name}
+                            </Link>
+                            {b.repositoryUrl && (
+                              <a
+                                href={b.repositoryUrl}
+                                target="_blank"
+                                rel="noreferrer"
+                                className="flex items-center gap-1 text-[11px] text-blue-600 hover:underline mt-0.5"
+                              >
+                                <FolderGit2 className="size-3" /> Drive Repo <ExternalLink className="size-2.5" />
+                              </a>
+                            )}
+                          </div>
+                        </div>
+                      </td>
+
+                      {/* Campaigns */}
+                      <td className="px-3 py-3 max-w-[200px]">
+                        <div className="flex flex-wrap gap-1">
+                          {b.campaigns.slice(0, 3).map((c) => (
+                            <JiraEpicPill key={c.id} name={c.name} color={b.color} />
+                          ))}
+                          {b.campaigns.length > 3 && (
+                            <span className="text-[10.5px] font-semibold text-slate-400">
+                              +{b.campaigns.length - 3} more
+                            </span>
+                          )}
+                          {b.campaigns.length === 0 && (
+                            <span className="text-[11.5px] text-slate-400">No campaigns</span>
+                          )}
+                        </div>
+                      </td>
+
+                      {/* Progress Bar */}
+                      <td className="px-3 py-3 min-w-[180px]">
+                        <div className="flex items-center justify-between text-[11px] font-semibold mb-1">
+                          <span className="text-slate-900 dark:text-white">{pct}% Complete</span>
+                          <span className="text-slate-400 font-mono">{done}/{total}</span>
+                        </div>
+                        <div className="flex h-1.5 w-full overflow-hidden rounded-full bg-stone-100 dark:bg-stone-800">
+                          <div style={{ width: `${pct}%` }} className="bg-emerald-500" title={`Done: ${done}`} />
+                          <div
+                            style={{ width: `${total ? (inProgress / total) * 100 : 0}%` }}
+                            className="bg-blue-500"
+                            title={`In Progress: ${inProgress}`}
+                          />
+                        </div>
+                      </td>
+
+                      {/* Logged Hours */}
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-slate-900 dark:text-white font-mono">
+                        {totalHours}h
+                      </td>
+
+                      {/* Cost */}
+                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+                        ₹{totalCost.toLocaleString("en-IN")}
+                      </td>
+
+                      {/* Health */}
+                      <td className="px-3 py-3">
+                        <span
+                          className={cn(
+                            "rounded px-2 py-0.5 text-[10px] font-semibold uppercase",
+                            health === "On track" && "bg-emerald-50 text-emerald-700",
+                            health === "At risk" && "bg-amber-50 text-amber-700",
+                            health === "Off track" && "bg-rose-50 text-rose-700"
+                          )}
+                        >
+                          {health}
+                        </span>
+                      </td>
+
+                      {/* Next Milestone */}
+                      <td className="px-3 py-3 text-[11.5px] text-slate-500 font-mono">
+                        {nextDue ? fmtDate(nextDue) : "—"}
+                      </td>
+
+                      {/* Action */}
+                      <td className="px-4 py-3 text-right">
+                        <Link
+                          href={`/brands/${b.id}`}
+                          className="h-7 px-2.5 rounded-md border border-stone-200 bg-white hover:bg-slate-50 text-[11.5px] font-semibold text-slate-800 inline-flex items-center gap-1 shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22] dark:text-slate-200"
+                        >
+                          <Kanban className="size-3" /> Board
+                        </Link>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <p className="mt-2 text-[11px] text-muted">Health: On track = nothing late · At risk = 1–2 late tasks · Off track = 3 or more.</p>
-      </div>
-    </div>
+      </PageBody>
+    </Page>
   );
 }

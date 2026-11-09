@@ -18,6 +18,24 @@ export const TYPES = [
   "UGC", "YT shorts", "AI Film", "Meta Ads", "Social Content",
 ];
 
+// Separate work types (actions / sessions / stages of work)
+export const WORK_TYPES = [
+  "Run", "Pause", "Scripting", "Assembly Edit", "Rough Cut", "Fine Cut",
+  "Color Grading", "Sound Design", "Motion Graphics", "Feedback Revisions",
+  "Export & Delivery", "Other",
+] as const;
+export type WorkType = (typeof WORK_TYPES)[number];
+
+export const PIPELINE_STAGES = [
+  "Open",
+  "Submitted",
+  "Sent for approval",
+  "Feedback",
+  "Done",
+  "Reopened",
+  "On hold",
+] as const;
+
 export const PLATFORMS = [
   "Instagram", "YouTube", "Instagram + YouTube", "WhatsApp", "Website", "OTT",
   "YouTube Shorts", "AI Demo",

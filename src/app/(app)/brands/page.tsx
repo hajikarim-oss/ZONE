@@ -31,6 +31,8 @@ export default async function BrandsPage() {
             pocName: b.pocName ?? "",
             pocEmail: b.pocEmail ?? "",
             color: b.color,
+            repositoryUrl: b.repositoryUrl ?? "",
+            guidelines: b.guidelines ?? "",
             open: b.projects.filter((p) => !isDone(p as any)).length,
             total: b.projects.length,
             clients: b.clients.map((c) => ({ id: c.id, name: c.name, email: c.email })),

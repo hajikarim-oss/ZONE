@@ -1,9 +1,9 @@
 "use client";
 
-import { Plus, Trash2, UserPlus, X } from "lucide-react";
+import { ExternalLink, FolderGit2, Info, Plus, Trash2, UserPlus, X } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
-import { createBrand, createClientLogin, deleteBrand, deleteClientLogin, updateBrand } from "@/lib/actions";
+import { createBrand, createClientLogin, deleteBrand, deleteClientLogin, updateBrand, updateBrandDetails } from "@/lib/actions";
 
 type BrandRow = {
   id: string;
@@ -11,6 +11,8 @@ type BrandRow = {
   pocName: string;
   pocEmail: string;
   color: string;
+  repositoryUrl?: string | null;
+  guidelines?: string | null;
   open: number;
   total: number;
   clients: { id: string; name: string; email: string }[];
@@ -22,21 +24,25 @@ function AddBrand() {
   const [pocName, setPocName] = useState("");
   const [pocEmail, setPocEmail] = useState("");
   const [color, setColor] = useState("#5b3fd1");
+  const [repositoryUrl, setRepositoryUrl] = useState("");
+  const [guidelines, setGuidelines] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [pending, start] = useTransition();
+
   if (!open)
     return (
       <button className="btn-primary" onClick={() => setOpen(true)}>
         <Plus className="h-3.5 w-3.5" /> Add brand
       </button>
     );
+
   return (
     <form
-      className="rounded-lg border border-line bg-canvas p-4"
+      className="rounded-lg border border-line bg-canvas p-4 space-y-3"
       onSubmit={(e) => {
         e.preventDefault();
         start(async () => {
-          const r = await createBrand({ name, pocName, pocEmail, color });
+          const r = await createBrand({ name, pocName, pocEmail, color, repositoryUrl, guidelines });
           if (r && "error" in r && r.error) return setError(r.error);
           window.location.reload();
         });
@@ -47,6 +53,21 @@ function AddBrand() {
         <input value={pocName} onChange={(e) => setPocName(e.target.value)} placeholder="POC name (internal or client)" className="field-input" />
         <input type="email" value={pocEmail} onChange={(e) => setPocEmail(e.target.value)} placeholder="POC email" className="field-input" />
         <input type="color" value={color} onChange={(e) => setColor(e.target.value)} className="h-[34px] w-12 cursor-pointer rounded-md border border-line bg-surface p-1" />
+      </div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <input
+          type="url"
+          value={repositoryUrl}
+          onChange={(e) => setRepositoryUrl(e.target.value)}
+          placeholder="Master Google Drive repository URL (assets, raw files)..."
+          className="field-input"
+        />
+        <input
+          value={guidelines}
+          onChange={(e) => setGuidelines(e.target.value)}
+          placeholder="New joiner guidelines / onboarding notes..."
+          className="field-input"
+        />
       </div>
       {error && <p className="mt-2 text-[12px] text-rose-600">{error}</p>}
       <div className="mt-3 flex gap-2">
@@ -90,13 +111,29 @@ function BrandCard({ b }: { b: BrandRow }) {
   const [addingClient, setAddingClient] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [, start] = useTransition();
+
   const save = (patch: Partial<BrandRow>) =>
     start(async () => {
-      try { await updateBrand(b.id, patch); setError(null); } catch (e) { setError(e instanceof Error ? e.message : "Couldn't save"); }
+      try {
+        await updateBrand(b.id, patch);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't save");
+      }
+    });
+
+  const saveDetails = (patch: { repositoryUrl?: string | null; guidelines?: string | null }) =>
+    start(async () => {
+      try {
+        await updateBrandDetails(b.id, patch);
+        setError(null);
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Couldn't save details");
+      }
     });
 
   return (
-    <div className="rounded-lg border border-line p-4">
+    <div className="rounded-lg border border-line bg-surface p-4">
       <div className="flex flex-wrap items-center gap-3">
         <input
           type="color"
@@ -136,7 +173,12 @@ function BrandCard({ b }: { b: BrandRow }) {
             onClick={() => {
               if (!confirm(`Delete ${b.name}?`)) return;
               start(async () => {
-                try { await deleteBrand(b.id); window.location.reload(); } catch (e) { setError(e instanceof Error ? e.message : "Couldn't delete"); }
+                try {
+                  await deleteBrand(b.id);
+                  window.location.reload();
+                } catch (e) {
+                  setError(e instanceof Error ? e.message : "Couldn't delete");
+                }
               });
             }}
           >
@@ -144,6 +186,42 @@ function BrandCard({ b }: { b: BrandRow }) {
           </button>
         </div>
       </div>
+
+      {/* Master Drive Repository */}
+      <div className="mt-3 flex items-center gap-2 text-[12px]">
+        <FolderGit2 className="h-4 w-4 text-muted shrink-0" />
+        <input
+          type="url"
+          value={form.repositoryUrl ?? ""}
+          onChange={(e) => setForm({ ...form, repositoryUrl: e.target.value })}
+          onBlur={() => form.repositoryUrl !== b.repositoryUrl && saveDetails({ repositoryUrl: form.repositoryUrl })}
+          placeholder="Master Google Drive repository link (raw files, final exports, assets)..."
+          className="field-input flex-1 py-1 text-[12px]"
+        />
+        {form.repositoryUrl && (
+          <a
+            href={form.repositoryUrl}
+            target="_blank"
+            rel="noreferrer"
+            className="flex items-center gap-1 text-[12px] text-accent hover:underline shrink-0"
+          >
+            <ExternalLink className="h-3 w-3" /> Open
+          </a>
+        )}
+      </div>
+
+      {/* Guidelines / Notes for New Joiners */}
+      <div className="mt-2 text-[12px]">
+        <textarea
+          value={form.guidelines ?? ""}
+          onChange={(e) => setForm({ ...form, guidelines: e.target.value })}
+          onBlur={() => form.guidelines !== b.guidelines && saveDetails({ guidelines: form.guidelines })}
+          placeholder="Brand guidelines & onboarding notes for new editors (e.g. fonts, aspect ratios, style references, dos & don'ts)..."
+          rows={2}
+          className="field-input w-full py-1 text-[12px] resize-y"
+        />
+      </div>
+
       {error && <p className="mt-2 text-[12px] text-rose-600">{error}</p>}
 
       <div className="mt-3 border-t border-line/70 pt-3">
@@ -158,7 +236,10 @@ function BrandCard({ b }: { b: BrandRow }) {
                 title="Remove login"
                 onClick={() => {
                   if (!confirm(`Remove ${c.email}'s login?`)) return;
-                  start(async () => { await deleteClientLogin(c.id); window.location.reload(); });
+                  start(async () => {
+                    await deleteClientLogin(c.id);
+                    window.location.reload();
+                  });
                 }}
               >
                 <X className="h-3 w-3" />

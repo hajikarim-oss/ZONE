@@ -46,15 +46,18 @@ export function DueText({ date, done }: { date: string | null; done?: boolean })
 export function DelayBadge({ t }: { t: TaskDTO }) {
   const d = computeDelay(t);
   if (!d) return null;
+  const isEditor = d.who === "EDITOR";
   return (
     <span
       className={cn(
-        "rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
-        d.who === "EDITOR" ? "bg-rose-50 text-rose-700" : "bg-amber-50 text-amber-700",
+        "rounded-md px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider border shrink-0",
+        isEditor
+          ? "bg-rose-50 text-rose-700 border-rose-200/80 dark:bg-rose-950/40 dark:text-rose-300 dark:border-rose-900/60"
+          : "bg-amber-50 text-amber-700 border-amber-200/80 dark:bg-amber-950/40 dark:text-amber-300 dark:border-amber-900/60",
       )}
       title={`${d.days} day(s) past deadline`}
     >
-      {d.who === "EDITOR" ? "Team late" : "Waiting on brand"} · {d.days}d
+      {isEditor ? "Team late" : "Waiting on brand"} · {d.days}d
     </span>
   );
 }
@@ -120,7 +123,13 @@ export function StatusSelect({
   const col = boardColumn(t);
   const c = BOARD_COLUMNS.find((x) => x.key === col)!;
   return (
-    <span className={cn("inline-flex w-full min-w-0 items-center gap-1.5 rounded-full pl-2", className)} style={{ background: c.dot + "2b" }}>
+    <span
+      className={cn(
+        "inline-flex w-full min-w-0 items-center gap-1.5 rounded-full px-2.5 py-0.5 border border-line/60 transition-colors hover:border-line shadow-xs",
+        className
+      )}
+      style={{ background: c.dot + "15" }}
+    >
       <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ background: c.dot }} />
       <select
         value={col}
@@ -130,7 +139,7 @@ export function StatusSelect({
           const patch = dropPatch(t, e.target.value as BoardKey);
           if (patch) onUpdate(t.id, patch);
         }}
-        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent py-0.5 pr-2 text-[12px] font-medium text-ink outline-none disabled:cursor-default"
+        className="min-w-0 flex-1 cursor-pointer appearance-none truncate bg-transparent py-0.5 pr-2 text-[12px] font-semibold text-ink outline-none disabled:cursor-default"
         title={c.hint}
       >
         {BOARD_COLUMNS.map((x) => (

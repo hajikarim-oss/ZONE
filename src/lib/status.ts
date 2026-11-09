@@ -12,34 +12,40 @@ export type StageKey =
   | "approved"
   | "delivered"
   | "closed"
+  | "reopened"
   | "onhold";
 
 export const STAGE_GROUPS: { key: StageKey; label: string; dot: string }[] = [
-  { key: "awaiting", label: "Awaiting brief", dot: "#a2a0a2" },
+  { key: "awaiting", label: "Open (Awaiting brief)", dot: "#a2a0a2" },
   { key: "preprod", label: "Pre-production", dot: "#8d84e8" },
   { key: "shoot", label: "Shoot", dot: "#4573d2" },
-  { key: "editing", label: "Editing", dot: "#f1bd6c" },
-  { key: "review", label: "In review", dot: "#e8384f" },
-  { key: "revision", label: "Revisions", dot: "#fd612c" },
+  { key: "editing", label: "Submitted (In Progress)", dot: "#f1bd6c" },
+  { key: "review", label: "Sent for approval", dot: "#3b82f6" },
+  { key: "revision", label: "Feedback (Revisions)", dot: "#fd612c" },
   { key: "approved", label: "Approved", dot: "#5da283" },
   { key: "delivered", label: "Delivered", dot: "#4ecbc4" },
-  { key: "closed", label: "Closed", dot: "#6d6e6f" },
+  { key: "closed", label: "Done (Closed)", dot: "#6d6e6f" },
+  { key: "reopened", label: "Reopened", dot: "#e11d48" },
   { key: "onhold", label: "On hold", dot: "#b8a28c" },
 ];
 
-// The five board columns (Asana-style), each covering one or more stages.
-export type BoardKey = "upcoming" | "ongoing" | "revision" | "onhold" | "completed";
+// The Asana/Jira board columns matching the requested pipeline:
+// Open -> Submitted -> Sent for approval -> Feedback -> Done (and Reopened, On hold)
+export type BoardKey = "open" | "submitted" | "approval" | "feedback" | "done" | "reopened" | "onhold" | "upcoming" | "ongoing" | "revision" | "completed";
+
 export const BOARD_COLUMNS: { key: BoardKey; label: string; dot: string; stages: StageKey[]; hint: string }[] = [
-  { key: "upcoming", label: "Upcoming", dot: "#8d84e8", stages: ["awaiting", "preprod", "shoot"], hint: "Brief, script, pre-production or shoot — editing hasn't started" },
-  { key: "ongoing", label: "Ongoing", dot: "#f1bd6c", stages: ["editing", "review", "approved"], hint: "Being edited, with the brand for review, or approved and awaiting delivery" },
-  { key: "revision", label: "Revision", dot: "#fd612c", stages: ["revision"], hint: "Internal or external revisions" },
+  { key: "open", label: "Open", dot: "#8d84e8", stages: ["awaiting", "preprod", "shoot"], hint: "Brief, script, pre-production or unstarted editing" },
+  { key: "submitted", label: "Submitted", dot: "#f1bd6c", stages: ["editing"], hint: "Being actively edited or in progress" },
+  { key: "approval", label: "Sent for approval", dot: "#3b82f6", stages: ["review"], hint: "First cut sent, awaiting review & approval" },
+  { key: "feedback", label: "Feedback", dot: "#fd612c", stages: ["revision"], hint: "Internal or external client revision feedback" },
+  { key: "done", label: "Done", dot: "#5da283", stages: ["approved", "delivered", "closed"], hint: "Final approved, delivered or closed" },
+  { key: "reopened", label: "Reopened", dot: "#e11d48", stages: ["reopened"], hint: "Client requested changes after prior approval" },
   { key: "onhold", label: "On hold", dot: "#b8a28c", stages: ["onhold"], hint: "Paused" },
-  { key: "completed", label: "Completed", dot: "#5da283", stages: ["delivered", "closed"], hint: "Delivered or closed" },
 ];
 
 export function boardColumn(p: StatusInput): BoardKey {
   const k = computeStage(p).key;
-  return BOARD_COLUMNS.find((c) => c.stages.includes(k))?.key ?? "upcoming";
+  return BOARD_COLUMNS.find((c) => c.stages.includes(k))?.key ?? "open";
 }
 
 export function boardStatusPatch(t: StatusInput, to: BoardKey): Record<string, unknown> {
@@ -84,6 +90,7 @@ export type Stage = { key: StageKey; label: string };
 export function computeStage(p: StatusInput): Stage {
   // On hold takes absolute priority when set
   if (p.onHold) return { key: "onhold", label: "On hold" };
+  if (p.editStatus === "Reopened") return { key: "reopened", label: "Reopened" };
   if (p.deliveryStatus === "Project Closed") return { key: "closed", label: "Closed" };
   if (p.deliveryStatus === "Files Sent" || p.deliveryStatus === "Invoice Raised")
     return { key: "delivered", label: "Delivered" };
@@ -113,7 +120,7 @@ export function computeStage(p: StatusInput): Stage {
 
 export function isDone(p: StatusInput) {
   const k = computeStage(p).key;
-  return k === "delivered" || k === "closed";
+  return k === "delivered" || k === "closed" || k === "approved";
 }
 
 // Who is the project waiting on right now? A cut that's been sent / is in
@@ -196,6 +203,8 @@ export function clientStatus(p: StatusInput): string {
       return "Completed";
     case "onhold":
       return "On hold";
+    default:
+      return s.label || "In progress";
   }
 }
 

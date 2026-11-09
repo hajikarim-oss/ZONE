@@ -11,10 +11,18 @@ import {
   BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPARTMENTS, DEPTS, EDIT_STATUSES, FINAL_APPROVAL,
   PREPRO_STAGES, PRIORITIES, REVISION_ALERT_ROUND, ROLES, SCRIPT_STAGES, SHOOT_STATUSES,
 } from "@/lib/constants";
-import { forViewer, taskInclude, toTaskDTO, type StorageDTO, type TaskDTO } from "@/lib/dto";
-import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert } from "@/lib/notify";
-import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
+import { forViewer, taskInclude, toTaskDTO, type StorageDTO, type TaskDTO, type TimeEntryDTO } from "@/lib/dto";
+export type { TimeEntryDTO } from "@/lib/dto";
+import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert, onTimelineRevised, onWorkSessionStarted, onWorkSessionStopped } from "@/lib/notify";
+import { APP_URL, emailHtml, isEmailEnabled, sendMail } from "@/lib/mailer";
 import { runDailyAutomations, type DailyResult } from "@/lib/automations";
+import {
+  syncProjectToGoogleCalendar,
+  deleteProjectFromGoogleCalendar,
+  syncAllUserTasksToGoogleCalendar,
+  disconnectGoogleCalendar,
+  fetchGoogleCalendarEvents,
+} from "@/lib/google-calendar";
 
 const ENUMS: Record<string, readonly string[]> = {
   priority: PRIORITIES,
@@ -28,9 +36,10 @@ const ENUMS: Record<string, readonly string[]> = {
   finalApproval: FINAL_APPROVAL,
   deliveryStatus: DELIVERY_STATUSES,
 };
-const TEXT = new Set(["title", "type", "platform", "notes", "context"]);
+const TEXT = new Set(["title", "type", "platform", "notes", "context", "workType"]);
 const DATES = new Set(["externalDeadline", "internalDeadline", "startAt", "endAt"]);
-const REFS = new Set(["brandId", "assigneeId", "storageId"]);
+const REFS = new Set(["brandId", "campaignId", "assigneeId", "storageId"]);
+const NUMS = new Set(["version", "cost"]);
 const BOOLS = new Set(["onHold"]);
 
 // Run slow side work (history, notifications, emails) after the response is
@@ -90,7 +99,8 @@ const FIELD_LABEL: Record<string, string> = {
   briefStage: "Brief", scriptStage: "Concept / script", preProStage: "Pre-pro", shootStatus: "Shoot",
   editStatus: "Edit status", revisionRound: "Revision round", clientReview: "Client review",
   finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Description",
-  externalDeadline: "External deadline", internalDeadline: "Due date", brandId: "Brand", assigneeId: "Assignee",
+  externalDeadline: "External deadline", internalDeadline: "Due date", brandId: "Brand", campaignId: "Campaign",
+  assigneeId: "Assignee", workType: "Work Type", version: "Version", cost: "Cost",
   onHold: "On hold", startAt: "Start", endAt: "End", storageId: "Storage",
 };
 
@@ -103,6 +113,12 @@ function coerce(field: string, raw: unknown): unknown {
   if (field === "revisionRound") {
     const n = Number(raw);
     if (!Number.isInteger(n) || n < 0 || n > 10) throw new Error("Invalid revision round");
+    return n;
+  }
+  if (NUMS.has(field)) {
+    if (raw == null || raw === "") return null;
+    const n = Number(raw);
+    if (isNaN(n)) throw new Error(`Invalid number for ${FIELD_LABEL[field]}`);
     return n;
   }
   if (TEXT.has(field)) {
@@ -170,11 +186,34 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
 
   const after = await prisma.project.update({ where: { id }, data, include: taskInclude });
 
+  // If deliverable deadline changed and belongs to a campaign, sync all sister deliverables & campaign
+  const targetCampaignId = (data.campaignId as string) || (before as any).campaignId || before.campaign?.id;
+  if (targetCampaignId && ("internalDeadline" in data || "externalDeadline" in data)) {
+    const syncData: Record<string, unknown> = {};
+    if ("internalDeadline" in data) syncData.internalDeadline = data.internalDeadline;
+    if ("externalDeadline" in data) syncData.externalDeadline = data.externalDeadline;
+    later("sync campaign deadline", async () => {
+      try {
+        await prisma.campaign.update({
+          where: { id: targetCampaignId },
+          data: syncData,
+        });
+        await prisma.project.updateMany({
+          where: { campaignId: targetCampaignId, archived: false, id: { not: id } },
+          data: syncData,
+        });
+      } catch (e) {
+        console.error("Failed to cascade campaign deadline:", e);
+      }
+    });
+  }
+
   const changes = Object.keys(patch).filter((f) => show((before as any)[f], f) !== show((after as any)[f], f));
   later("task history + automations", async () => {
   if (changes.length) {
     const names = async (f: string, v: unknown) => {
       if (f === "brandId" && v) return (await prisma.brand.findUnique({ where: { id: String(v) } }))?.name ?? "—";
+      if (f === "campaignId" && v) return (await prisma.campaign.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "assigneeId" && v) return (await prisma.user.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "storageId" && v) return (await prisma.storage.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       return show(v, f);
@@ -184,7 +223,7 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
         changes.map(async (f) => ({
           projectId: id,
           actorName: me.name,
-          field: FIELD_LABEL[f] ?? f,
+          field: f === "assigneeId" ? "Handover" : (FIELD_LABEL[f] ?? f),
           fromValue: await names(f, (before as any)[f]),
           toValue: await names(f, (after as any)[f]),
         })),
@@ -193,11 +232,14 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   }
 
   // On-edit automations
-  if (after.assigneeId && after.assigneeId !== before.assigneeId && after.assigneeId !== me.id) await onAssigned(after);
+  if (after.assigneeId && after.assigneeId !== before.assigneeId) await onAssigned(after, me);
   if (after.editStatus === "First Cut Sent" && before.editStatus !== "First Cut Sent") await onFirstCutSent(after);
   if (after.revisionRound >= REVISION_ALERT_ROUND && before.revisionRound < REVISION_ALERT_ROUND) await onRevisionAlert(after);
   if (after.finalApproval === "Approved" && before.finalApproval !== "Approved") await onFinalApproved(after);
   if (after.deliveryStatus === "Project Closed" && before.deliveryStatus !== "Project Closed") await onClosed(after);
+
+  // Sync to Google Calendar (if assignee has Google Calendar connected)
+  await syncProjectToGoogleCalendar(after.id);
   });
 
   // No page refresh needed: the screen already shows the change.
@@ -217,6 +259,7 @@ async function nextCode() {
 export async function createTask(input: {
   title: string;
   brandId?: string | null;
+  campaignId?: string | null;
   assigneeId?: string | null;
   internalDeadline?: string | null;
   externalDeadline?: string | null;
@@ -224,54 +267,121 @@ export async function createTask(input: {
   endAt?: string | null;
   storageId?: string | null;
   context?: string | null;
+  notes?: string | null;
   priority?: string;
   type?: string | null;
+  workType?: string | null;
+  version?: number;
+  cost?: number | null;
   platform?: string | null;
   collaboratorIds?: string[];
+  initialDriveUrl?: string | null;
+  initialSubtasks?: { title: string; assigneeId?: string | null; dueDate?: string | null }[];
 }): Promise<TaskDTO> {
   const me = await requireTeamUser();
   if (!canCreateProjects(me)) throw new Error("You can't add tasks");
+
+  // Mandatory brand and campaign check (Feedback: "A task cannot be saved without a brand and a campaign")
+  if (!input.brandId?.trim()) {
+    throw new Error("A task cannot be saved without a brand. Please select a brand.");
+  }
+  if (!input.campaignId?.trim()) {
+    throw new Error("A task cannot be saved without a campaign. Please select a campaign.");
+  }
+
   const title = input.title?.trim();
   if (!title) throw new Error("Give the task a name");
+
+  const [brand, campaign] = await Promise.all([
+    prisma.brand.findUnique({ where: { id: input.brandId } }),
+    prisma.campaign.findUnique({ where: { id: input.campaignId } }),
+  ]);
+  if (!brand) throw new Error("Selected brand does not exist");
+  if (!campaign) throw new Error("Selected campaign does not exist");
+
   const seeAll = canSeeAll(me);
   const collabIds = [...new Set((input.collaboratorIds ?? []).filter(Boolean))];
   // Team members assign tasks to themselves, except inside a brand workspace
   // they belong to, where they can assign anyone (like an Asana project).
-  const inWorkspace = !!input.brandId && me.brandIds.includes(input.brandId);
+  const inWorkspace = me.brandIds.includes(input.brandId);
   const assigneeId = seeAll || inWorkspace ? input.assigneeId || (seeAll ? null : me.id) : me.id;
   const when = (v?: string | null) => (v && !isNaN(new Date(v).getTime()) ? new Date(v) : null);
+
+  // Inherit deadlines from campaign if not specified directly
+  const intDl = when(input.internalDeadline) ?? campaign.internalDeadline;
+  const extDl = (seeAll && input.externalDeadline ? when(input.externalDeadline) : null) ?? campaign.externalDeadline;
+
   const p = await prisma.project.create({
     data: {
       code: await nextCode(),
       title,
-      brandId: input.brandId || null,
-      // Team members add tasks for themselves (like Asana's My tasks)
+      brandId: input.brandId,
+      campaignId: input.campaignId,
       assigneeId,
       createdById: me.id,
       collaborators: collabIds.length ? { connect: collabIds.map((id) => ({ id })) } : undefined,
       priority: input.priority && PRIORITIES.includes(input.priority as any) ? input.priority : "Medium",
       type: input.type || null,
+      workType: input.workType || null,
+      version: input.version || 1,
+      cost: input.cost != null ? Number(input.cost) : null,
       platform: input.platform || null,
-      internalDeadline: when(input.internalDeadline),
+      internalDeadline: intDl,
       startAt: when(input.startAt),
       endAt: when(input.endAt),
       storageId: input.storageId || null,
       context: input.context?.trim() || null,
-      externalDeadline: seeAll && input.externalDeadline ? new Date(input.externalDeadline) : null,
+      notes: input.notes?.trim() || null,
+      externalDeadline: extDl,
       lastTeamUpdateAt: new Date(),
     },
     include: taskInclude,
   });
-  later("new task notifications", async () => {
-    await prisma.activity.create({ data: { projectId: p.id, actorName: me.name, field: "Created", toValue: p.title } });
-    if (p.assigneeId && p.assigneeId !== me.id) await onAssigned(p);
-    for (const c of p.collaborators) {
-      if (c.id === me.id || c.id === p.assigneeId) continue;
-      const u = await prisma.user.findUnique({ where: { id: c.id } });
-      if (u) await notify(u.id, `${me.name} added you to ${p.title}`, "You're a collaborator on this task", taskHref(u.role, p.id));
+
+  if (input.initialDriveUrl?.trim()) {
+    await prisma.attachment.create({
+      data: {
+        projectId: p.id,
+        name: "Master Footage / Assets Drive",
+        url: input.initialDriveUrl.trim(),
+        addedByName: me.name,
+      },
+    });
+  }
+
+  if (input.initialSubtasks && input.initialSubtasks.length > 0) {
+    for (let i = 0; i < input.initialSubtasks.length; i++) {
+      const s = input.initialSubtasks[i];
+      if (!s.title?.trim()) continue;
+      await prisma.subtask.create({
+        data: {
+          projectId: p.id,
+          title: s.title.trim(),
+          assigneeId: s.assigneeId || assigneeId || null,
+          dueDate: s.dueDate ? new Date(s.dueDate) : intDl,
+          position: i,
+        },
+      });
     }
+  }
+
+  const fullProject = (input.initialDriveUrl?.trim() || (input.initialSubtasks && input.initialSubtasks.length > 0))
+    ? await prisma.project.findUnique({ where: { id: p.id }, include: taskInclude })
+    : p;
+  const finalP = fullProject || p;
+
+  later("new task notifications", async () => {
+    await prisma.activity.create({ data: { projectId: finalP.id, actorName: me.name, field: "Created", toValue: finalP.title } });
+    if (finalP.assigneeId) await onAssigned(finalP, me);
+    for (const c of finalP.collaborators) {
+      if (c.id === me.id || c.id === finalP.assigneeId) continue;
+      const u = await prisma.user.findUnique({ where: { id: c.id } });
+      if (u) await notify(u.id, `${me.name} added you to ${finalP.title}`, "You're a collaborator on this task", taskHref(u.role, finalP.id));
+    }
+    // Sync newly created task to assignee's Google Calendar
+    await syncProjectToGoogleCalendar(finalP.id);
   });
-  return forViewer(toTaskDTO(p), seeAll);
+  return forViewer(toTaskDTO(finalP), seeAll);
 }
 
 // Collaborators: they can see the task, comment on it and get its updates.
@@ -328,6 +438,7 @@ export async function setArchived(id: string, archived: boolean) {
 export async function deleteTask(id: string) {
   const me = await requireTeamUser();
   if (!isAdmin(me)) throw new Error("Only admins can delete tasks");
+  later("delete from google calendar", () => deleteProjectFromGoogleCalendar(id));
   await prisma.project.delete({ where: { id } });
 }
 
@@ -543,7 +654,20 @@ export async function addUpdate(projectId: string, body: string): Promise<Update
   for (const id of followers) {
     if (id === me.id || mentionedIds.has(id)) continue;
     const f = people.find((x) => x.id === id);
-    if (f) await notify(f.id, `${me.name} commented on ${p.title}`, snippet, taskHref(f.role, p.id));
+    if (f) {
+      await notify(f.id, `${me.name} commented on ${p.title}`, snippet, taskHref(f.role, p.id));
+      if (f.email) {
+        await sendMail(
+          f.email,
+          `💬 ${me.name}: Update on "${p.title}"`,
+          emailHtml({
+            heading: `New comment on ${p.title}`,
+            intro: `**${me.name}** posted an update on **${p.title}**${p.brand ? ` (${p.brand.name})` : ""}:\n\n"${text}"`,
+            cta: { label: "Open Deliverable & Reply", href: `${APP_URL}${taskHref(f.role, p.id)}` },
+          })
+        );
+      }
+    }
   }
   for (const m of mentioned) {
     await notify(m.id, `${me.name} mentioned you on ${p.title}`, snippet, taskHref(m.role, p.id));
@@ -650,18 +774,37 @@ export async function deleteTeamUser(id: string) {
 
 // ───────────────────────── Brands (BRAND REGISTRY) ─────────────────────────
 
-export async function createBrand(input: { name: string; pocName?: string; pocEmail?: string; color?: string }) {
+export async function createBrand(input: {
+  name: string;
+  pocName?: string;
+  pocEmail?: string;
+  color?: string;
+  repositoryUrl?: string;
+  guidelines?: string;
+}) {
   const me = await requireTeamUser();
-  if (!canManageBrands(me)) throw new Error("Only admins can add brands");
+  if (me.role === "CLIENT") throw new Error("Clients cannot add brands");
   const name = input.name.trim();
   if (!name) return { error: "Brand name is required." };
   if (await prisma.brand.findFirst({ where: { name: { equals: name, mode: "insensitive" } } })) return { error: "That brand already exists." };
   const color = /^#[0-9a-f]{6}$/i.test(input.color ?? "") ? input.color! : "#5b3fd1";
-  await prisma.brand.create({
-    data: { name, pocName: input.pocName?.trim() || null, pocEmail: input.pocEmail?.trim().toLowerCase() || null, color },
+  const b = await prisma.brand.create({
+    data: {
+      name,
+      pocName: input.pocName?.trim() || null,
+      pocEmail: input.pocEmail?.trim().toLowerCase() || null,
+      color,
+      repositoryUrl: input.repositoryUrl?.trim() || null,
+      guidelines: input.guidelines?.trim() || null,
+      members: { connect: { id: me.id } },
+      favoritedBy: { connect: { id: me.id } },
+      campaigns: {
+        create: { name: "General" },
+      },
+    },
   });
   revalidatePath("/", "layout");
-  return { ok: true };
+  return { ok: true, id: b.id };
 }
 
 export async function updateBrand(id: string, patch: { name?: string; pocName?: string; pocEmail?: string; color?: string }) {
@@ -733,7 +876,14 @@ export async function runAutomationsNow(): Promise<DailyResult> {
 export async function sendTestEmail(): Promise<{ ok: boolean; message: string }> {
   const me = await requireTeamUser();
   if (!isAdmin(me)) throw new Error("Only admins can send test emails");
-  if (!process.env.SMTP_HOST) return { ok: false, message: "SMTP_HOST is empty in .env. Fill in the SMTP lines and restart the app." };
+  if (!isEmailEnabled()) {
+    return {
+      ok: false,
+      message: process.env.DISABLE_EMAIL_NOTIFICATIONS === "true" || process.env.ENABLE_EMAIL_NOTIFICATIONS === "false"
+        ? "Email notifications are disabled (DISABLE_EMAIL_NOTIFICATIONS=true)."
+        : "SMTP_HOST is empty in .env. Fill in the SMTP lines and restart the app.",
+    };
+  }
   const r = await sendMail(
     me.email,
     "✅ TBM Post Prod Panel — test email",
@@ -809,4 +959,373 @@ export async function deleteGoal(id: string) {
   if (!canSeeAll(me)) throw new Error("Only admins and managers can delete goals");
   await prisma.goal.delete({ where: { id } });
   revalidatePath("/goals");
+}
+
+export async function syncMyGoogleCalendar(): Promise<{ ok: boolean; synced: number; total: number; message?: string }> {
+  const me = await requireTeamUser();
+  try {
+    const res = await syncAllUserTasksToGoogleCalendar(me.id);
+    revalidatePath("/my-tasks");
+    return { ok: true, synced: res.synced, total: res.total };
+  } catch (err: any) {
+    return { ok: false, synced: 0, total: 0, message: err?.message || "Sync failed" };
+  }
+}
+
+export async function disconnectMyGoogleCalendar(): Promise<{ ok: boolean }> {
+  const me = await requireTeamUser();
+  await disconnectGoogleCalendar(me.id);
+  revalidatePath("/my-tasks");
+  return { ok: true };
+}
+
+export async function getMyGoogleCalendarStatus(): Promise<{ connected: boolean; email: string }> {
+  const me = await requireTeamUser();
+  const u = await prisma.user.findUnique({
+    where: { id: me.id },
+    select: { email: true, googleCalendarSync: true, googleRefreshToken: true },
+  });
+  return {
+    connected: Boolean(u?.googleCalendarSync && u?.googleRefreshToken),
+    email: u?.email ?? me.email,
+  };
+}
+
+export async function getMyGoogleCalendarEvents(timeMin?: string, timeMax?: string) {
+  const me = await requireTeamUser();
+  return fetchGoogleCalendarEvents(me.id, timeMin, timeMax);
+}
+
+// ---------- Campaigns ----------
+export async function createCampaign(input: {
+  brandId: string;
+  name: string;
+  internalDeadline?: string | null;
+  externalDeadline?: string | null;
+  budget?: number | null;
+  repositoryUrl?: string | null;
+}) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only managers and admins can create campaigns");
+  const name = input.name?.trim();
+  if (!name) throw new Error("Campaign name is required");
+  const when = (v?: string | null) => (v && !isNaN(new Date(v).getTime()) ? new Date(v) : null);
+  const campaign = await prisma.campaign.create({
+    data: {
+      brandId: input.brandId,
+      name,
+      internalDeadline: when(input.internalDeadline),
+      externalDeadline: when(input.externalDeadline),
+      budget: input.budget != null ? Number(input.budget) : null,
+      repositoryUrl: input.repositoryUrl?.trim() || null,
+    },
+  });
+  revalidatePath("/projects");
+  revalidatePath("/brands");
+  return campaign;
+}
+
+export async function updateCampaign(
+  id: string,
+  patch: {
+    name?: string;
+    internalDeadline?: string | null;
+    externalDeadline?: string | null;
+    budget?: number | null;
+    repositoryUrl?: string | null;
+    status?: string;
+  },
+) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only managers and admins can edit campaigns");
+  const when = (v?: string | null) => (v && !isNaN(new Date(v).getTime()) ? new Date(v) : null);
+  const data: Record<string, unknown> = {};
+  if (patch.name !== undefined && patch.name.trim()) data.name = patch.name.trim();
+  if (patch.internalDeadline !== undefined) data.internalDeadline = when(patch.internalDeadline);
+  if (patch.externalDeadline !== undefined) data.externalDeadline = when(patch.externalDeadline);
+  if (patch.budget !== undefined) data.budget = patch.budget != null ? Number(patch.budget) : null;
+  if (patch.repositoryUrl !== undefined) data.repositoryUrl = patch.repositoryUrl?.trim() || null;
+  if (patch.status !== undefined) data.status = patch.status;
+
+  const campaign = await prisma.campaign.update({ where: { id }, data });
+
+  // If campaign deadline changed, cascade update to all deliverables in this campaign!
+  if (patch.internalDeadline !== undefined || patch.externalDeadline !== undefined) {
+    const projectPatch: Record<string, unknown> = {};
+    if (patch.internalDeadline !== undefined) projectPatch.internalDeadline = when(patch.internalDeadline);
+    if (patch.externalDeadline !== undefined) projectPatch.externalDeadline = when(patch.externalDeadline);
+    await prisma.project.updateMany({
+      where: { campaignId: id, archived: false },
+      data: projectPatch,
+    });
+  }
+
+  revalidatePath("/projects");
+  revalidatePath("/brands");
+  return campaign;
+}
+
+export async function deleteCampaign(id: string) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only managers and admins can delete campaigns");
+  await prisma.campaign.delete({ where: { id } });
+  revalidatePath("/projects");
+  revalidatePath("/brands");
+}
+
+// ---------- Time Tracking ----------
+export async function addTimeEntry(input: {
+  projectId: string;
+  durationMinutes: number;
+  workType?: string | null;
+  notes?: string | null;
+  date?: string | null;
+}): Promise<TimeEntryDTO> {
+  const me = await requireTeamUser();
+  const { p } = await viewTask(input.projectId);
+  if (!input.durationMinutes || input.durationMinutes <= 0) throw new Error("Enter duration in minutes");
+  const when = input.date && !isNaN(new Date(input.date).getTime()) ? new Date(input.date) : new Date();
+
+  const user = await prisma.user.findUnique({ where: { id: me.id }, select: { hourlyRate: true, name: true } });
+  const hourlyRate = user?.hourlyRate ?? 0;
+
+  const te = await prisma.timeEntry.create({
+    data: {
+      projectId: input.projectId,
+      userId: me.id,
+      date: when,
+      durationMinutes: input.durationMinutes,
+      workType: input.workType?.trim() || null,
+      notes: input.notes?.trim() || null,
+      hourlyRate,
+    },
+    include: { user: { select: { name: true } } },
+  });
+
+  later("time logged activity", async () => {
+    await prisma.activity.create({
+      data: {
+        projectId: input.projectId,
+        actorName: me.name,
+        field: "Time Log",
+        toValue: `Logged ${Math.floor(input.durationMinutes / 60)}h ${input.durationMinutes % 60}m (${input.workType || "Work"})`,
+      },
+    });
+  });
+
+  return {
+    id: te.id,
+    projectId: te.projectId,
+    userId: te.userId,
+    userName: te.user.name,
+    date: te.date.toISOString(),
+    durationMinutes: te.durationMinutes,
+    hours: Number((te.durationMinutes / 60).toFixed(1)),
+    workType: te.workType,
+    notes: te.notes,
+    hourlyRate: te.hourlyRate,
+    cost: Number(((te.durationMinutes / 60) * (te.hourlyRate || 0)).toFixed(2)),
+    createdAt: te.createdAt.toISOString(),
+  };
+}
+
+export async function startWorkSession(projectId: string): Promise<{ ok: boolean; startedAt: string; task: TaskDTO }> {
+  const me = await requireTeamUser();
+  await viewTask(projectId);
+  const full = await prisma.project.findUnique({ where: { id: projectId } });
+  if (!full) throw new Error("Task not found");
+
+  const now = new Date();
+  const updateData: Record<string, unknown> = {
+    lastTeamUpdateAt: now,
+  };
+  if (!full.startAt) {
+    updateData.startAt = now;
+  }
+  // If task was not in progress, move to In Progress
+  if (full.editStatus === "Not Started" || full.briefStage === "Not Started") {
+    updateData.editStatus = "In Progress";
+  }
+
+  const updated = await prisma.project.update({
+    where: { id: projectId },
+    data: updateData,
+    include: taskInclude,
+  });
+
+  later("work session started", async () => {
+    await prisma.activity.create({
+      data: {
+        projectId,
+        actorName: me.name,
+        field: "Live Session",
+        toValue: `Started work session at ${now.toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" })}`,
+      },
+    });
+    await onWorkSessionStarted(updated, me);
+  });
+
+  return {
+    ok: true,
+    startedAt: now.toISOString(),
+    task: forViewer(toTaskDTO(updated), canSeeAll(me)),
+  };
+}
+
+export async function stopWorkSession(input: {
+  projectId: string;
+  durationMinutes: number;
+  workType?: string | null;
+  notes?: string | null;
+  markSubmitted?: boolean;
+}): Promise<{ ok: boolean; entry: TimeEntryDTO; task: TaskDTO }> {
+  const me = await requireTeamUser();
+  const { p } = await viewTask(input.projectId);
+
+  const entry = await addTimeEntry({
+    projectId: input.projectId,
+    durationMinutes: input.durationMinutes,
+    workType: input.workType,
+    notes: input.notes,
+  });
+
+  const updateData: Record<string, unknown> = {
+    endAt: new Date(),
+    lastTeamUpdateAt: new Date(),
+  };
+  if (input.markSubmitted) {
+    updateData.editStatus = "Submitted";
+  }
+
+  const updated = await prisma.project.update({
+    where: { id: input.projectId },
+    data: updateData,
+    include: taskInclude,
+  });
+
+  later("work session stopped", async () => {
+    await onWorkSessionStopped(
+      updated,
+      me,
+      input.durationMinutes,
+      input.workType || updated.workType || "Assembly Edit",
+      input.notes
+    );
+  });
+
+  return {
+    ok: true,
+    entry,
+    task: forViewer(toTaskDTO(updated), canSeeAll(me)),
+  };
+}
+
+export async function getTimeEntries(projectId: string): Promise<TimeEntryDTO[]> {
+  const { me } = await viewTask(projectId);
+  const rows = await prisma.timeEntry.findMany({
+    where: { projectId },
+    include: { user: { select: { name: true } } },
+    orderBy: { date: "desc" },
+  });
+  return rows.map((te) => ({
+    id: te.id,
+    projectId: te.projectId,
+    userId: te.userId,
+    userName: te.user.name,
+    date: te.date.toISOString(),
+    durationMinutes: te.durationMinutes,
+    hours: Number((te.durationMinutes / 60).toFixed(1)),
+    workType: te.workType,
+    notes: te.notes,
+    hourlyRate: te.hourlyRate,
+    cost: Number(((te.durationMinutes / 60) * (te.hourlyRate || 0)).toFixed(2)),
+    createdAt: te.createdAt.toISOString(),
+  }));
+}
+
+export async function deleteTimeEntry(id: string) {
+  const me = await requireTeamUser();
+  const te = await prisma.timeEntry.findUnique({ where: { id } });
+  if (!te) return;
+  if (!canSeeAll(me) && te.userId !== me.id) throw new Error("Not allowed to delete someone else's time entry");
+  await prisma.timeEntry.delete({ where: { id: te.id } });
+}
+
+export async function setUserHourlyRate(userId: string, rate: number) {
+  const me = await requireTeamUser();
+  if (!isAdmin(me)) throw new Error("Only admins can set hourly rates");
+  await prisma.user.update({ where: { id: userId }, data: { hourlyRate: Math.max(0, rate) } });
+  revalidatePath("/team");
+}
+
+// ---------- Brand Details ----------
+export async function updateBrandDetails(
+  brandId: string,
+  patch: {
+    name?: string;
+    pocName?: string | null;
+    pocEmail?: string | null;
+    color?: string;
+    repositoryUrl?: string | null;
+    guidelines?: string | null;
+  },
+) {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only managers and admins can edit brand details");
+  const data: Record<string, unknown> = {};
+  if (patch.name !== undefined && patch.name.trim()) data.name = patch.name.trim();
+  if (patch.pocName !== undefined) data.pocName = patch.pocName?.trim() || null;
+  if (patch.pocEmail !== undefined) data.pocEmail = patch.pocEmail?.trim() || null;
+  if (patch.color !== undefined) data.color = patch.color;
+  if (patch.repositoryUrl !== undefined) data.repositoryUrl = patch.repositoryUrl?.trim() || null;
+  if (patch.guidelines !== undefined) data.guidelines = patch.guidelines?.trim() || null;
+  const brand = await prisma.brand.update({ where: { id: brandId }, data });
+  revalidatePath("/brands");
+  return brand;
+}
+
+// ---------- Timeline Revision Request ----------
+export async function requestDeadlineExtension(
+  projectId: string,
+  newDate: string,
+  reason: string
+) {
+  const me = await requireTeamUser();
+  await viewTask(projectId);
+
+  const fullProject = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: taskInclude,
+  });
+  if (!fullProject) throw new Error("Task not found");
+
+  const note = `⚠️ TIMELINE REVISION SUBMITTED by ${me.name}:
+• Proposed Deadline: ${newDate}
+• Reason / Justification: ${reason.trim()}`;
+
+  // 1. Post to update thread
+  await addUpdate(projectId, note);
+
+  // 2. Increment intDeadlineChanges and append note
+  const updatedNotes = fullProject.notes
+    ? `${fullProject.notes}\n[Extension Request by ${me.name}]: ${newDate} - ${reason.trim()}`
+    : `[Extension Request by ${me.name}]: ${newDate} - ${reason.trim()}`;
+
+  const parseDate = newDate ? new Date(newDate) : null;
+
+  await prisma.project.update({
+    where: { id: projectId },
+    data: {
+      intDeadlineChanges: { increment: 1 },
+      notes: updatedNotes,
+      internalDeadline: parseDate && !isNaN(parseDate.getTime()) ? parseDate : undefined,
+    },
+  });
+
+  // 3. Notify Assigner & Managers
+  await onTimelineRevised(fullProject, me.name, newDate, reason);
+
+  revalidatePath("/projects");
+  revalidatePath("/my-tasks");
+  return { ok: true };
 }

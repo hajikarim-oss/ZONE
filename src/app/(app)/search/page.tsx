@@ -46,6 +46,16 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
         }
       : {}),
   };
+  const PRESET_DESCRIPTIONS: Record<string, string> = {
+    "due-week": "Deliverables scheduled for delivery within the next 7 days",
+    overdue: "Deliverables past internal deadline requiring escalation and immediate progress",
+    revision: "Deliverables currently undergoing revision following internal or client review",
+    "on-hold": "Deliverables paused or waiting on brand feedback / assets",
+    "completed-week": "Deliverables finalized and marked done over the past 7 days",
+    "added-by-me": "Deliverables created or initiated by you",
+    unassigned: "Deliverables currently unallocated without an assigned editor",
+  };
+
   const hasQuery = !!p || !!term;
   const data = await loadWorkspace(me, hasQuery ? where : { id: "__none__" });
 
@@ -54,7 +64,13 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
       <TaskWorkspace
         key={`${preset}|${term}`}
         title={p ? p.label : term ? `Search: “${term}”` : "Search"}
-        subtitle={hasQuery ? `${data.tasks.length} task${data.tasks.length === 1 ? "" : "s"} found` : "Type in the search box at the top, or pick a saved search in the sidebar."}
+        subtitle={
+          hasQuery
+            ? `${data.tasks.length} deliverable${data.tasks.length === 1 ? "" : "s"} · ${
+                (p && PRESET_DESCRIPTIONS[p.key]) || "Filtered production view"
+              }`
+            : "Type in the search box at the top, or pick a saved search in the sidebar."
+        }
         mode="all"
         showDoneDefault={preset === "completed-week" || !!term}
         defaultGroupBy="board"

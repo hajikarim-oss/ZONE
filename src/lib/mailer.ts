@@ -4,8 +4,16 @@ import nodemailer from "nodemailer";
 // never throws into the caller's flow.
 let transporter: ReturnType<typeof nodemailer.createTransport> | null = null;
 
+// All outgoing emails are redirected to this address to protect team & clients.
+export const REDIRECT_ALL_EMAILS_TO = process.env.REDIRECT_ALL_EMAILS_TO || "haji.karim@theboredmonkey.com";
+
+export function isEmailEnabled(): boolean {
+  if (process.env.DISABLE_EMAIL_NOTIFICATIONS === "true") return false;
+  return Boolean(process.env.SMTP_HOST);
+}
+
 function getTransporter() {
-  if (!process.env.SMTP_HOST) return null;
+  if (!isEmailEnabled()) return null;
   if (!transporter) {
     transporter = nodemailer.createTransport({
       host: process.env.SMTP_HOST,
@@ -42,8 +50,35 @@ export function emailHtml(opts: { heading: string; intro?: string; rows?: string
 }
 
 export async function sendMail(to: string | string[], subject: string, html: string, cc?: string[]): Promise<{ ok: boolean; error?: string }> {
-  const list = (Array.isArray(to) ? to : [to]).filter(Boolean);
+  let list = (Array.isArray(to) ? to : [to]).filter(Boolean);
   if (!list.length) return { ok: false, error: "No recipient" };
+  if (!isEmailEnabled()) {
+    console.log(`[mailer] Email notifications are disabled — skipped email to ${list.join(", ")}: ${subject}`);
+    return { ok: false, error: "Email notifications are disabled" };
+  }
+
+  let finalCc = cc?.filter(Boolean) || [];
+  let finalSubject = subject;
+  let finalHtml = html;
+
+  // Intercept and redirect to Karim so team & clients never receive emails
+  if (REDIRECT_ALL_EMAILS_TO) {
+    const originalTo = list.join(", ");
+    const originalCc = finalCc.length ? ` (CC: ${finalCc.join(", ")})` : "";
+    finalSubject = `[Original To: ${originalTo}${originalCc}] ${subject}`;
+    finalHtml = `
+      <div style="background:#fff3cd;border:1px solid #ffeeba;color:#856404;padding:12px 16px;border-radius:6px;font-family:Inter,Segoe UI,Arial,sans-serif;font-size:13px;line-height:1.4;margin-bottom:20px;">
+        <strong>⚠️ REDIRECTED TEST EMAIL</strong><br/>
+        This email was intercepted and redirected to <strong>${REDIRECT_ALL_EMAILS_TO}</strong>.<br/>
+        <strong>Original recipient(s):</strong> ${originalTo}${originalCc}
+      </div>
+      ${html}
+    `;
+    list = [REDIRECT_ALL_EMAILS_TO];
+    finalCc = [];
+    console.log(`[mailer] Intercepted & redirected email for ${originalTo} to ${REDIRECT_ALL_EMAILS_TO}: ${subject}`);
+  }
+
   const t = getTransporter();
   if (!t) {
     console.log(`[mailer] SMTP not configured — skipped email to ${list.join(", ")}: ${subject}`);
@@ -53,9 +88,9 @@ export async function sendMail(to: string | string[], subject: string, html: str
     await t.sendMail({
       from: process.env.SMTP_FROM || "notifications@theboredmonkey.com",
       to: list.join(", "),
-      cc: cc?.filter(Boolean).join(", ") || undefined,
-      subject,
-      html,
+      cc: finalCc.length ? finalCc.join(", ") : undefined,
+      subject: finalSubject,
+      html: finalHtml,
     });
     return { ok: true };
   } catch (err) {

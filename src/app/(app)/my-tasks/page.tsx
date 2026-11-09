@@ -15,7 +15,7 @@ export default async function MyTasksPage() {
     <Suspense>
       <TaskWorkspace
         title="My tasks"
-        subtitle={`Tasks assigned to you (or a subtask of yours), tasks you added, and tasks you collaborate on, ${me.name.split(" ")[0]}. Add your own with "Add task".`}
+        subtitle="Your active queue, assigned deliverables, and collaborations"
         mode="mine"
         defaultGroupBy="board"
         headerExtra={<CalendarLink url={calendarFeedUrl(me.id)} />}

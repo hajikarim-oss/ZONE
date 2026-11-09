@@ -26,6 +26,12 @@ model User {
   active       Boolean  @default(true) // Inactive = locked out (old "tab locked")
   createdAt    DateTime @default(now())
 
+  googleRefreshToken   String?
+  googleAccessToken    String?
+  googleTokenExpiresAt DateTime?
+  googleCalendarSync   Boolean  @default(false)
+  googleCalendarId     String?  @default("primary")
+
   assigned      Project[]      @relation("Assignee")
   createdTasks  Project[]      @relation("Creator")
   collaborating Project[]      @relation("Collaborators")
@@ -35,22 +41,47 @@ model User {
   subtasks      Subtask[]
   favorites     Brand[]        @relation("Favorites")    // starred projects in the sidebar
   goals         Goal[]
+  hourlyRate    Float?         @default(0)
+  timeEntries   TimeEntry[]
 }
 
 // BRAND REGISTRY
 model Brand {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  pocName   String?
-  pocEmail  String?
-  color     String   @default("#5b3fd1")
-  createdAt DateTime @default(now())
+  id            String   @id @default(cuid())
+  name          String   @unique
+  pocName       String?
+  pocEmail      String?
+  color         String   @default("#5b3fd1")
+  repositoryUrl String?  // Brand master Drive repository / assets link
+  guidelines    String?  // Style guidelines, onboarding notes for new joiners
+  createdAt     DateTime @default(now())
+
+  campaigns Campaign[]
+  projects  Project[]
+  clients   Client[]
+  members   User[]    @relation("BrandMembers") // workspace members (see all its tasks)
+  favoritedBy User[]  @relation("Favorites")
+  goals     Goal[]
+}
+
+// CAMPAIGNS (Brand -> Campaign -> Deliverable)
+model Campaign {
+  id               String    @id @default(cuid())
+  name             String
+  brandId          String
+  brand            Brand     @relation(fields: [brandId], references: [id], onDelete: Cascade)
+  repositoryUrl    String?   // Drive folder for this specific campaign
+  internalDeadline DateTime? // Campaign-level master due date (all videos inherit/sync)
+  externalDeadline DateTime? // Client contract deadline for campaign
+  budget           Float?
+  status           String    @default("Active") // Active | Completed | On hold
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 
   projects Project[]
-  clients  Client[]
-  members  User[]    @relation("BrandMembers") // workspace members (see all its tasks)
-  favoritedBy User[] @relation("Favorites")
-  goals    Goal[]
+
+  @@unique([brandId, name])
+  @@index([brandId])
 }
 
 // Brand POC logins (replaces the per-brand Google Sheet)
@@ -70,8 +101,13 @@ model Project {
   code     String  @unique // TBM-001
   title    String
   brandId  String?
-  brand    Brand?  @relation(fields: [brandId], references: [id], onDelete: SetNull)
-  type     String?
+  brand    Brand?    @relation(fields: [brandId], references: [id], onDelete: SetNull)
+  campaignId String?
+  campaign   Campaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+  type     String?   // Deliverable type: DVC, Reel, YT Video, etc.
+  workType String?   // Work type: Scripting, Assembly, Color/Sound, Run, Pause, etc.
+  version  Int       @default(1)
+  cost     Float?    // Calculated or assigned video cost
   platform String?
   dept     String  @default("Post Production")
 
@@ -121,14 +157,36 @@ model Project {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  googleCalendarEventId String?
+
   updates     Update[]
   activity    Activity[]
   subtasks    Subtask[]
   attachments Attachment[]
+  timeEntries TimeEntry[]
 
   @@index([assigneeId])
   @@index([brandId])
+  @@index([campaignId])
   @@index([archived])
+}
+
+// Time tracking (who worked on which video, for how long, each day)
+model TimeEntry {
+  id              String   @id @default(cuid())
+  projectId       String
+  project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  date            DateTime @default(now())
+  durationMinutes Int      // minutes worked
+  workType        String?  // Run, Pause, Assembly, Revision, Sound, etc.
+  notes           String?
+  hourlyRate      Float?
+  createdAt       DateTime @default(now())
+
+  @@index([projectId])
+  @@index([userId, date])
 }
 
 // Editor notes / links thread on a project (old "EDITOR NOTES / LINKS" col)
@@ -200,6 +258,8 @@ model Subtask {
   done       Boolean   @default(false)
   position   Int       @default(0)
   createdAt  DateTime  @default(now())
+
+  googleCalendarEventId String?
 
   @@index([projectId])
   @@index([assigneeId])

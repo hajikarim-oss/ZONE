@@ -10,7 +10,7 @@ export async function loadWorkspace(me: User & { brandIds: string[] }, where: Pr
   const [tasks, people, brands, storages] = await Promise.all([
     prisma.project.findMany({ where: scoped, include: taskInclude, orderBy: { code: "asc" } }),
     prisma.user.findMany({ orderBy: { name: "asc" } }),
-    prisma.brand.findMany({ orderBy: { name: "asc" } }),
+    prisma.brand.findMany({ orderBy: { name: "asc" }, include: { campaigns: { orderBy: { name: "asc" } } } }),
     prisma.storage.findMany({ orderBy: { name: "asc" }, select: { id: true, name: true } }),
   ]);
   return {

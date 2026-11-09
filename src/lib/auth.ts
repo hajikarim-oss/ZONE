@@ -25,6 +25,7 @@ export type SessionUser = {
   email: string;
   role: Role;
   brandId?: string | null;
+  googleCalendarSync?: boolean;
 };
 
 export const authOptions: NextAuthOptions = {
@@ -34,7 +35,14 @@ export const authOptions: NextAuthOptions = {
     GoogleProvider({
       clientId: process.env.GOOGLE_CLIENT_ID ?? "",
       clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
-      authorization: { params: { prompt: "select_account" } },
+      authorization: {
+        params: {
+          prompt: "consent",
+          access_type: "offline",
+          response_type: "code",
+          scope: "openid email profile https://www.googleapis.com/auth/calendar.events",
+        },
+      },
     }),
     CredentialsProvider({
       name: "Email and password",
@@ -73,11 +81,34 @@ export const authOptions: NextAuthOptions = {
     },
     async jwt({ token, user, account }) {
       if (user && account?.provider === "google" && user.email) {
-        const dbUser = await prisma.user.findUnique({ where: { email: user.email.toLowerCase() } });
+        const email = user.email.toLowerCase();
+        const updateData: Record<string, unknown> = {};
+        if (account.refresh_token) {
+          updateData.googleRefreshToken = account.refresh_token;
+          updateData.googleCalendarSync = true;
+        }
+        if (account.access_token) {
+          updateData.googleAccessToken = account.access_token;
+          updateData.googleTokenExpiresAt = account.expires_at ? new Date(account.expires_at * 1000) : null;
+        }
+
+        let dbUser: any = null;
+        if (Object.keys(updateData).length > 0) {
+          try {
+            dbUser = await prisma.user.update({ where: { email }, data: updateData });
+          } catch (e) {
+            console.error("[auth] Failed to persist google tokens:", e);
+          }
+        }
+        if (!dbUser) {
+          dbUser = await prisma.user.findUnique({ where: { email } });
+        }
+
         if (dbUser) {
           token.id = dbUser.id;
           token.role = dbUser.role;
           token.name = dbUser.name;
+          token.googleCalendarSync = Boolean(dbUser.googleCalendarSync);
         }
       } else if (user && account?.provider === "credentials") {
         token.id = (user as any).id;
@@ -92,6 +123,7 @@ export const authOptions: NextAuthOptions = {
         (session.user as any).id = token.id;
         (session.user as any).role = token.role as Role;
         (session.user as any).brandId = (token as any).brandId ?? null;
+        (session.user as any).googleCalendarSync = Boolean((token as any).googleCalendarSync);
         if (token.name) session.user.name = token.name as string;
       }
       return session;

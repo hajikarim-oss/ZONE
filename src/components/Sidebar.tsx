@@ -1,22 +1,32 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname, useRouter } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useEffect, useRef, useState, useTransition } from "react";
 import { signOut } from "next-auth/react";
 import {
-  Bell, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Copy, Home, LayoutList, LogOut, Menu,
-  MoreHorizontal, Plus, Search, Star, Tags, Target, Briefcase, UserPlus, Users, X, Zap,
+  Bell, CheckCheck, CheckCircle2, ChevronDown, ChevronRight, CircleHelp, Copy, FolderGit2, FolderKanban,
+  Home, Kanban, LayoutList, LogOut, Menu, MoreHorizontal, Plus, Rows3, Search, Settings, Star,
+  Tags, Target, Briefcase, UserPlus, Users, X, Zap, Calendar, ArrowLeft, BookOpen, Layers, ExternalLink, Activity, BarChart3
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Avatar from "@/components/Avatar";
-import Logo from "@/components/Logo";
 import ThemeToggle from "@/components/ThemeToggle";
+import CreateBrandModal from "@/components/brands/CreateBrandModal";
+import CreateCampaignModal from "@/components/brands/CreateCampaignModal";
 import { ROLE_LABEL } from "@/lib/constants";
 import { createProject, toggleFavorite } from "@/lib/actions";
 import { SAVED_SEARCHES } from "@/lib/saved-searches";
 
-type Project = { id: string; name: string; color: string };
+export type BrandSidebarItem = {
+  id: string;
+  name: string;
+  color: string;
+  repositoryUrl?: string | null;
+  guidelines?: string | null;
+  campaigns?: { id: string; name: string }[];
+};
+
 type Props = {
   name: string;
   email: string;
@@ -25,356 +35,493 @@ type Props = {
   admin: boolean;
   unread: number;
   myOpen: number;
-  brands: Project[];
+  brands: BrandSidebarItem[];
   favoriteIds: string[];
   team: { id: string; name: string }[];
   teamCount: number;
 };
 
-function Item({ href, icon: Icon, label, count, badge, active, tour }: { href: string; icon: any; label: string; count?: number; badge?: boolean; active: boolean; tour?: string }) {
-  return (
-    <Link
-      href={href}
-      data-tour={tour}
-      className={cn(
-        "flex items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] transition-colors",
-        active ? "bg-side-active font-medium text-side-fg" : "text-side-fg/80 hover:bg-side-hover hover:text-side-fg",
-      )}
-    >
-      <Icon className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+function NavRow({
+  href,
+  icon: Icon,
+  label,
+  count,
+  badge,
+  active,
+  external,
+}: {
+  href: string;
+  icon: any;
+  label: string;
+  count?: number;
+  badge?: boolean;
+  active: boolean;
+  external?: boolean;
+}) {
+  const content = (
+    <>
+      <Icon
+        className={cn(
+          "size-4 shrink-0 transition-colors",
+          active ? "text-slate-900 dark:text-white" : "text-slate-400 dark:text-slate-500"
+        )}
+        strokeWidth={1.8}
+      />
       <span className="flex-1 truncate">{label}</span>
+      {external && <ExternalLink className="size-3 text-slate-400 shrink-0" />}
       {!!count &&
         (badge ? (
-          <span className="min-w-[18px] rounded-full bg-accent px-1.5 text-center text-[11px] font-semibold text-white">{count > 99 ? "99+" : count}</span>
+          <span className="min-w-[18px] rounded-full bg-rose-500 px-1.5 py-0.2 text-center text-[10px] font-bold text-white shadow-xs">
+            {count > 99 ? "99+" : count}
+          </span>
         ) : (
-          <span className="text-[11px] text-side-muted">{count}</span>
+          <span className="font-mono text-[10.5px] rounded bg-black/5 dark:bg-white/10 px-1.5 py-0.2 text-slate-500 dark:text-slate-400 tabular-nums">
+            {count}
+          </span>
         ))}
+    </>
+  );
+
+  const className = cn(
+    "h-8 px-2.5 rounded-md flex items-center gap-2.5 text-[12.5px] font-medium transition-colors cursor-pointer",
+    active
+      ? "bg-slate-200/70 font-semibold text-slate-950 dark:bg-white/10 dark:text-white shadow-2xs"
+      : "text-slate-700 hover:bg-slate-200/40 hover:text-slate-950 dark:text-slate-300 dark:hover:bg-white/5 dark:hover:text-white"
+  );
+
+  if (external) {
+    return (
+      <a href={href} target="_blank" rel="noreferrer" className={className}>
+        {content}
+      </a>
+    );
+  }
+
+  return (
+    <Link href={href} className={className}>
+      {content}
     </Link>
   );
 }
 
-// Collapsible section header (Favorites, Saved searches…), remembered per browser
-function Section({ id, title, action, children, defaultOpen = true }: { id: string; title: string; action?: React.ReactNode; children: React.ReactNode; defaultOpen?: boolean }) {
-  const [open, setOpen] = useState(defaultOpen);
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem(`side:${id}`);
-      if (v !== null) setOpen(v === "1");
-    } catch {}
-  }, [id]);
+function SectionLabel({
+  title,
+  action,
+  open,
+  onToggle,
+}: {
+  title: string;
+  action?: React.ReactNode;
+  open?: boolean;
+  onToggle?: () => void;
+}) {
   return (
-    <div className="pt-3">
-      <div className="group flex items-center px-2.5 pb-1">
-        <button
-          onClick={() => {
-            setOpen((o) => {
-              try { localStorage.setItem(`side:${id}`, o ? "0" : "1"); } catch {}
-              return !o;
-            });
-          }}
-          className="flex flex-1 items-center gap-1 text-left text-[12px] font-medium text-side-muted hover:text-side-fg"
-        >
-          {title}
-          {open ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronRight className="h-3.5 w-3.5" />}
-        </button>
-        {action}
-      </div>
-      {open && <div className="space-y-0.5">{children}</div>}
-    </div>
-  );
-}
-
-function ProjectLink({ p, active, favorite, admin, onToggleFav }: { p: Project; active: boolean; favorite: boolean; admin: boolean; onToggleFav: (on: boolean) => void }) {
-  const [menu, setMenu] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    if (!menu) return;
-    const close = (e: MouseEvent) => !ref.current?.contains(e.target as Node) && setMenu(false);
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, [menu]);
-  return (
-    <div ref={ref} className="group relative">
-      <Link
-        href={`/brands/${p.id}`}
-        className={cn(
-          "flex items-center gap-2.5 rounded-md py-1.5 pl-2.5 pr-8 text-[13px] transition-colors",
-          active ? "bg-side-active font-medium text-side-fg" : "text-side-fg/80 hover:bg-side-hover hover:text-side-fg",
-        )}
-      >
-        <span className="h-2.5 w-2.5 shrink-0 rounded-[3px]" style={{ background: p.color }} />
-        <span className="truncate">{p.name}</span>
-      </Link>
+    <div className="flex items-center justify-between px-2.5 pt-3.5 pb-1">
       <button
-        onClick={() => setMenu((m) => !m)}
-        className={cn("absolute right-1 top-1/2 -translate-y-1/2 rounded p-1 text-side-muted hover:bg-side-hover hover:text-side-fg", menu ? "block" : "hidden group-hover:block")}
-        title="Project actions"
+        type="button"
+        onClick={onToggle}
+        className="flex items-center gap-1 text-left text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-400 dark:text-slate-500 hover:text-slate-700 dark:hover:text-slate-300 transition-colors"
       >
-        <MoreHorizontal className="h-4 w-4" />
+        {onToggle && (open ? <ChevronDown className="size-3" /> : <ChevronRight className="size-3" />)}
+        <span>{title}</span>
       </button>
-      {menu && (
-        <div className="absolute left-full top-0 z-50 ml-1 w-52 rounded-lg border border-line bg-surface py-1 text-[13px] text-ink shadow-pop">
-          <button className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-canvas" onClick={() => { onToggleFav(!favorite); setMenu(false); }}>
-            <Star className={cn("h-4 w-4", favorite && "fill-amber-400 text-amber-400")} />
-            {favorite ? "Remove from favorites" : "Add to favorites"}
-          </button>
-          <button
-            className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-canvas"
-            onClick={async () => {
-              try {
-                await navigator.clipboard.writeText(`${window.location.origin}/brands/${p.id}`);
-                setCopied(true);
-                setTimeout(() => { setCopied(false); setMenu(false); }, 900);
-              } catch {}
-            }}
-          >
-            <Copy className="h-4 w-4" /> {copied ? "Link copied" : "Copy project link"}
-          </button>
-          {admin && (
-            <Link href="/brands" className="flex w-full items-center gap-2 px-3 py-1.5 hover:bg-canvas" onClick={() => setMenu(false)}>
-              <Tags className="h-4 w-4" /> Edit project details
-            </Link>
-          )}
-        </div>
-      )}
+      {action}
     </div>
   );
 }
 
-export default function Sidebar({ name, email, role, seeAll, admin, unread, myOpen, brands, favoriteIds, team, teamCount }: Props) {
+export default function Sidebar({
+  name,
+  email,
+  role,
+  seeAll,
+  admin,
+  unread,
+  myOpen,
+  brands,
+  favoriteIds,
+  team,
+  teamCount,
+}: Props) {
   const path = usePathname();
   const router = useRouter();
-  const on = (p: string) => path === p || path.startsWith(p + "/");
+  const searchParams = useSearchParams();
+  const currentView = searchParams.get("view") || "board";
+  const currentCampaignId = searchParams.get("campaign");
   const [, start] = useTransition();
 
-  // Phone: slide-in drawer. Laptop: can be collapsed (☰), like Asana.
-  const [drawer, setDrawer] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
-  useEffect(() => setDrawer(false), [path]);
-  useEffect(() => {
-    try { setCollapsed(localStorage.getItem("side:collapsed") === "1"); } catch {}
-  }, []);
-  const collapse = (v: boolean) => {
-    setCollapsed(v);
-    try { localStorage.setItem("side:collapsed", v ? "1" : "0"); } catch {}
-  };
+  // Active brand detection for contextual project sidebar
+  const brandMatch = path.match(/^\/brands\/([^/?]+)/);
+  const activeBrandId = brandMatch ? brandMatch[1] : null;
+  const currentBrand = activeBrandId ? brands.find((b) => b.id === activeBrandId) : null;
 
-  // Favorites update instantly, then save
+  // Starred favorites
   const [favs, setFavs] = useState(favoriteIds);
   useEffect(() => setFavs(favoriteIds), [favoriteIds]);
   const setFav = (id: string, v: boolean) => {
     setFavs((f) => (v ? [...new Set([...f, id])] : f.filter((x) => x !== id)));
     start(async () => {
-      try { await toggleFavorite(id, v); } catch { setFavs(favoriteIds); }
+      try {
+        await toggleFavorite(id, v);
+      } catch {
+        setFavs(favoriteIds);
+      }
     });
   };
 
-  // New project (+)
-  const [adding, setAdding] = useState(false);
-  const [newName, setNewName] = useState("");
+  // Section toggle states
+  const [openFavs, setOpenFavs] = useState(true);
+  const [openAllProjects, setOpenAllProjects] = useState(true);
+  const [openCampaignsList, setOpenCampaignsList] = useState(true);
+  const [openAdmin, setOpenAdmin] = useState(true);
+  const [createBrandModalOpen, setCreateBrandModalOpen] = useState(false);
+  const [campaignModalBrand, setCampaignModalBrand] = useState<BrandSidebarItem | null>(null);
+  const [expandedBrands, setExpandedBrands] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    if (activeBrandId) {
+      setExpandedBrands((prev) => ({ ...prev, [activeBrandId]: true }));
+    }
+  }, [activeBrandId]);
+
+  // New brand inline creation
+  const [addingBrand, setAddingBrand] = useState(false);
+  const [newBrandName, setNewBrandName] = useState("");
   const [addErr, setAddErr] = useState<string | null>(null);
 
-  // Invite teammates (admins add people on the Team page)
-  const [inviteInfo, setInviteInfo] = useState(false);
-
-  // Live unread count: refreshes every 30s, when the tab regains focus and on navigation.
-  const [unreadLive, setUnreadLive] = useState(unread);
-  useEffect(() => setUnreadLive(unread), [unread]);
-  useEffect(() => {
-    let alive = true;
-    const load = () =>
-      fetch("/api/notifications/unread", { cache: "no-store" })
-        .then((r) => (r.ok ? r.json() : null))
-        .then((d) => alive && d && typeof d.count === "number" && setUnreadLive(d.count))
-        .catch(() => {});
-    load();
-    const t = setInterval(load, 30_000);
-    window.addEventListener("focus", load);
-    return () => {
-      alive = false;
-      clearInterval(t);
-      window.removeEventListener("focus", load);
-    };
-  }, [path]);
-
-  const favProjects = brands.filter((b) => favs.includes(b.id));
-  const projectLink = (b: Project) => (
-    <ProjectLink key={b.id} p={b} active={path === `/brands/${b.id}`} favorite={favs.includes(b.id)} admin={admin} onToggleFav={(v) => setFav(b.id, v)} />
-  );
+  const favoriteProjects = brands.filter((b) => favs.includes(b.id));
 
   return (
-    <>
-      {/* Phone top bar (hidden on laptop) */}
-      <div className="fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-line bg-side px-3 md:hidden">
-        <button onClick={() => setDrawer(true)} className="relative rounded-md p-2 text-side-fg hover:bg-side-hover" aria-label="Open menu">
-          <Menu className="h-5 w-5" />
-          {unreadLive > 0 && <span className="absolute right-1 top-1 h-2 w-2 rounded-full bg-accent" />}
-        </button>
-        <Link href="/home" className="flex min-w-0 items-center gap-2">
-          <Logo className="h-auto w-[120px]" />
-        </Link>
-        <Link href="/search" className="ml-auto rounded-md p-2 text-side-fg hover:bg-side-hover" aria-label="Search">
-          <Search className="h-5 w-5" />
-        </Link>
-      </div>
-      {drawer && <div className="fixed inset-0 z-40 bg-black/40 md:hidden" onClick={() => setDrawer(false)} />}
-
-      {/* Laptop: reopen button when collapsed */}
-      {collapsed && (
-        <button
-          onClick={() => collapse(false)}
-          className="fixed left-3 top-3 z-40 hidden rounded-md border border-line bg-surface p-1.5 text-muted shadow-pop hover:text-ink md:block"
-          title="Show sidebar"
-        >
-          <Menu className="h-4 w-4" />
-        </button>
-      )}
-
-      <aside
-        className={cn(
-          "flex h-dvh w-72 shrink-0 flex-col border-r border-line bg-side text-side-fg md:w-60",
-          "fixed inset-y-0 left-0 z-50 transition-transform duration-200 md:static md:z-auto md:translate-x-0",
-          drawer ? "translate-x-0 shadow-pop" : "-translate-x-full",
-          collapsed && "md:hidden",
-        )}
-      >
-        <button onClick={() => setDrawer(false)} className="absolute right-2 top-3 rounded-md p-2 text-side-muted hover:bg-side-hover md:hidden" aria-label="Close menu">
-          <X className="h-5 w-5" />
-        </button>
-        <div className="flex items-start gap-2 px-4 pb-3 pt-5">
-          <Link href="/home" className="block min-w-0 flex-1">
-            <Logo className="h-auto w-[150px]" />
-            <div className="mt-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-side-muted">Post Prod Panel</div>
-          </Link>
-          <button onClick={() => collapse(true)} className="hidden rounded-md p-1.5 text-side-muted hover:bg-side-hover hover:text-side-fg md:block" title="Hide sidebar">
-            <Menu className="h-4 w-4" />
-          </button>
-        </div>
-
-        <nav className="scroll-thin flex-1 overflow-y-auto px-2 pb-4">
+    <aside className="w-64 shrink-0 flex flex-col bg-[#FAF9F5] border-r border-stone-200/90 text-slate-800 dark:bg-[#0B0E14] dark:border-[#2C3B53] dark:text-slate-200">
+      <nav className="scroll-thin flex-1 overflow-y-auto px-2 py-3 space-y-1">
+        <div className="space-y-1">
           <div className="space-y-0.5">
-            <Item href="/home" icon={Home} label="Home" tour="nav-home" active={on("/home")} />
-            <Item href="/my-tasks" icon={CheckCircle2} label="My tasks" tour="nav-mytasks" count={myOpen} active={on("/my-tasks")} />
-            <Item href="/inbox" icon={Bell} label="Inbox" tour="nav-notifications" count={unreadLive} badge active={on("/inbox")} />
-            {seeAll && <Item href="/portfolios" icon={Briefcase} label="Portfolios" active={on("/portfolios")} />}
-            <Item href="/goals" icon={Target} label="Goals" active={on("/goals")} />
-            {seeAll && <Item href="/projects" icon={LayoutList} label="All projects" tour="nav-projects" active={on("/projects")} />}
+            <NavRow href="/home" icon={Home} label="Studio Dashboard" active={path === "/home"} />
+            <NavRow
+              href="/my-tasks"
+              icon={CheckCircle2}
+              label="Assigned to me"
+              count={myOpen}
+              active={path === "/my-tasks"}
+            />
+            <NavRow
+              href="/inbox"
+              icon={Bell}
+              label="Notifications"
+              count={unread}
+              badge
+              active={path === "/inbox"}
+            />
+            {seeAll && (
+              <NavRow
+                href="/portfolios"
+                icon={Briefcase}
+                label="Plans & Roadmaps"
+                active={path === "/portfolios"}
+              />
+            )}
+            <NavRow href="/goals" icon={Target} label="Goals" active={path === "/goals"} />
+            {seeAll && (
+              <NavRow
+                href="/projects"
+                icon={LayoutList}
+                label="All deliverables"
+                active={path === "/projects"}
+              />
+            )}
+            <NavRow
+              href="/analytics"
+              icon={BarChart3}
+              label="Analytics & Reports"
+              active={path === "/analytics"}
+            />
           </div>
 
-          <Section id="favorites" title="Favorites">
-            {favProjects.length === 0 ? (
-              <p className="px-2.5 py-1 text-[11px] text-side-muted">Star a project (⋯ → Add to favorites) to pin it here.</p>
-            ) : (
-              favProjects.map(projectLink)
-            )}
-          </Section>
-
-          <Section id="saved" title="Saved searches" defaultOpen={false}>
-            {SAVED_SEARCHES.filter((s) => seeAll || !s.adminOnly).map((s) => (
-              <Item key={s.key} href={`/search?preset=${s.key}`} icon={s.icon} label={s.label} active={false} />
-            ))}
-          </Section>
-
-          <div data-tour="nav-brands">
-            <Section
-              id="workspace"
-              title="TBM Workspace"
-              action={
-                <button onClick={() => { setAdding((a) => !a); setAddErr(null); }} className="rounded p-0.5 text-side-muted hover:bg-side-hover hover:text-side-fg" title="New project">
-                  <Plus className="h-4 w-4" />
-                </button>
-              }
-            >
-              {/* team avatars, like Asana */}
-              <div className="flex items-center gap-1 px-2.5 pb-1.5 pt-0.5">
-                {team.slice(0, 5).map((m) => (
-                  <span key={m.id} title={m.name}>
-                    <Avatar name={m.name} size={24} />
-                  </span>
-                ))}
-                {teamCount > 5 && <span className="pl-1 text-[11px] text-side-muted">+{teamCount - 5}</span>}
-                {admin && (
-                  <Link href="/team" className="ml-0.5 flex h-6 w-6 items-center justify-center rounded-full border border-dashed border-side-muted/60 text-side-muted hover:text-side-fg" title="Team">
-                    <Users className="h-3 w-3" />
+          {/* Starred Brands */}
+          <SectionLabel
+            title="Starred Brands"
+            open={openFavs}
+            onToggle={() => setOpenFavs((o) => !o)}
+          />
+          {openFavs && (
+            <div className="space-y-0.5">
+              {favoriteProjects.length === 0 ? (
+                <p className="px-2.5 py-1 text-[11px] text-slate-400">
+                  Star a brand to pin it here.
+                </p>
+              ) : (
+                favoriteProjects.map((b) => (
+                  <Link
+                    key={b.id}
+                    href={`/brands/${b.id}`}
+                    className={cn(
+                      "h-8 px-2.5 rounded-md flex items-center gap-2 text-[12.5px] font-medium transition-colors",
+                      path === `/brands/${b.id}`
+                        ? "bg-slate-200/70 font-semibold text-slate-950 dark:bg-white/10 dark:text-white"
+                        : "text-slate-700 hover:bg-slate-200/40 dark:text-slate-300 dark:hover:bg-white/5"
+                    )}
+                  >
+                    <span
+                      className="size-2.5 shrink-0 rounded-[2px]"
+                      style={{ backgroundColor: b.color }}
+                    />
+                    <span className="truncate">{b.name}</span>
                   </Link>
-                )}
-              </div>
+                ))
+              )}
+            </div>
+          )}
 
-              {adding && (
+          {/* Saved Filters */}
+          <SectionLabel title="Filters" />
+          <div className="space-y-0.5">
+            {SAVED_SEARCHES.filter((s) => seeAll || !s.adminOnly).map((s) => (
+              <NavRow
+                key={s.key}
+                href={`/search?preset=${s.key}`}
+                icon={s.icon}
+                label={s.label}
+                active={false}
+              />
+            ))}
+          </div>
+
+          {/* Brands & Campaigns */}
+          <SectionLabel
+            title="Brands"
+            open={openAllProjects}
+            onToggle={() => setOpenAllProjects((o) => !o)}
+            action={
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  setCreateBrandModalOpen(true);
+                }}
+                className="size-5 rounded border border-stone-300 dark:border-stone-700 hover:border-slate-900 dark:hover:border-white text-slate-500 hover:text-slate-950 dark:hover:text-white flex items-center justify-center transition-all cursor-pointer shadow-2xs"
+                title="Create / Add Brand"
+              >
+                <Plus className="size-3" strokeWidth={2.2} />
+              </button>
+            }
+          />
+          {openAllProjects && (
+            <div className="space-y-0.5">
+              {addingBrand && (
                 <form
-                  className="px-2 pb-1"
+                  className="px-2 pb-2 pt-1"
                   onSubmit={(e) => {
                     e.preventDefault();
+                    if (!newBrandName.trim()) return;
                     setAddErr(null);
                     start(async () => {
                       try {
-                        const { id } = await createProject({ name: newName });
-                        setNewName("");
-                        setAdding(false);
+                        const { id } = await createProject({ name: newBrandName });
+                        setNewBrandName("");
+                        setAddingBrand(false);
                         router.push(`/brands/${id}`);
                       } catch (err) {
-                        setAddErr(err instanceof Error ? err.message : "Couldn't create project");
+                        setAddErr(err instanceof Error ? err.message : "Couldn't create brand");
                       }
                     });
                   }}
                 >
                   <input
                     autoFocus
-                    value={newName}
-                    onChange={(e) => setNewName(e.target.value)}
-                    placeholder="New project / brand name"
-                    className="w-full rounded-md border border-line bg-surface px-2 py-1.5 text-[13px] text-ink outline-none focus:border-accent"
+                    value={newBrandName}
+                    onChange={(e) => setNewBrandName(e.target.value)}
+                    placeholder="Brand name"
+                    className="w-full rounded-md border border-[#FFE600] bg-white px-2 py-1 text-[12px] text-slate-900 outline-none shadow-2xs dark:bg-[#161B22] dark:text-white"
                   />
-                  {addErr && <p className="mt-1 text-[11px] text-rose-400">{addErr}</p>}
-                  <p className="mt-1 text-[11px] text-side-muted">Enter to create. You&apos;ll be its first member.</p>
+                  {addErr && <p className="mt-1 text-[11px] text-rose-500">{addErr}</p>}
                 </form>
               )}
-              {brands.length === 0 && !adding && <p className="px-2.5 text-xs text-side-muted">No projects yet. Click + to add one.</p>}
-              {brands.map(projectLink)}
-            </Section>
-          </div>
 
-          {(admin || seeAll) && (
-            <Section id="manage" title="Manage">
-              {admin && <Item href="/team" icon={Users} label="Team" tour="nav-team" active={on("/team")} />}
-              {admin && <Item href="/brands" icon={Tags} label="Brands & clients" tour="nav-brandsadmin" active={path === "/brands"} />}
-              {admin && <Item href="/automations" icon={Zap} label="Automations" tour="nav-automations" active={on("/automations")} />}
-              {seeAll && <Item href="/archive" icon={CheckCheck} label="Completed" tour="nav-completed" active={on("/archive")} />}
-            </Section>
-          )}
-        </nav>
+              {brands.map((b) => {
+                const isBrandActive = path === `/brands/${b.id}` && !currentCampaignId;
+                const isExpanded = expandedBrands[b.id] ?? (b.id === activeBrandId);
+                const hasCampaigns = (b.campaigns?.length ?? 0) > 0;
 
-        <div className="space-y-0.5 border-t border-line px-2 py-2">
-          {admin ? (
-            <Item href="/team?invite=1" icon={UserPlus} label="Invite teammates" active={false} />
-          ) : (
-            <div className="relative">
-              <button onClick={() => setInviteInfo((x) => !x)} className="flex w-full items-center gap-2.5 rounded-md px-2.5 py-1.5 text-[13px] text-side-fg/80 hover:bg-side-hover hover:text-side-fg">
-                <UserPlus className="h-4 w-4" strokeWidth={1.8} /> Invite teammates
-              </button>
-              {inviteInfo && (
-                <p className="mx-2.5 mb-1 rounded-md bg-side-hover px-2 py-1.5 text-[11px] text-side-fg/80">
-                  New people are added by an admin on the Team page. Ask an admin to invite them, then add them to your project from its members button.
-                </p>
-              )}
+                return (
+                  <div key={b.id} className="space-y-0.5">
+                    <div className="flex items-center group/brand rounded-md">
+                      <Link
+                        href={`/brands/${b.id}`}
+                        className={cn(
+                          "h-8 flex-1 px-2.5 rounded-md flex items-center gap-2 text-[12.5px] font-medium transition-colors min-w-0",
+                          isBrandActive
+                            ? "bg-slate-200/70 font-semibold text-slate-950 dark:bg-white/10 dark:text-white shadow-2xs"
+                            : "text-slate-700 hover:bg-slate-200/40 dark:text-slate-300 dark:hover:bg-white/5"
+                        )}
+                      >
+                        <span
+                          className="size-2.5 shrink-0 rounded-[2px]"
+                          style={{ backgroundColor: b.color }}
+                        />
+                        <span className="truncate flex-1">{b.name}</span>
+                        {!hasCampaigns && (
+                          <span className="text-[10px] text-slate-400 font-mono">
+                            0
+                          </span>
+                        )}
+                      </Link>
+                      {(admin || seeAll) && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setCampaignModalBrand(b);
+                          }}
+                          className="opacity-0 group-hover/brand:opacity-100 size-6 flex items-center justify-center text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 rounded shrink-0 transition-opacity cursor-pointer"
+                          title={`Add campaign to ${b.name}`}
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
+                      )}
+                      {hasCampaigns && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.preventDefault();
+                            e.stopPropagation();
+                            setExpandedBrands((prev) => ({ ...prev, [b.id]: !isExpanded }));
+                          }}
+                          className="size-7 flex items-center justify-center text-slate-400 hover:text-slate-700 dark:hover:text-slate-200 rounded shrink-0 transition-colors cursor-pointer"
+                          title={isExpanded ? "Collapse campaigns" : "Expand campaigns"}
+                        >
+                          <ChevronDown
+                            className={cn(
+                              "size-3.5 transition-transform duration-150",
+                              !isExpanded && "-rotate-90"
+                            )}
+                          />
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Indented child campaigns (matching Screenshot 1) */}
+                    {isExpanded && (
+                      <div className="pl-3.5 pr-1 space-y-0.5 border-l border-stone-200/70 dark:border-stone-800 ml-3.5 my-0.5">
+                        {hasCampaigns &&
+                          b.campaigns!.map((c) => {
+                            const isCampActive = path === `/brands/${b.id}` && currentCampaignId === c.id;
+                            return (
+                              <Link
+                                key={c.id}
+                                href={`/brands/${b.id}?campaign=${c.id}`}
+                                className={cn(
+                                  "h-7 px-2.5 rounded-md flex items-center gap-2 text-[12px] font-medium transition-colors",
+                                  isCampActive
+                                    ? "bg-[#5B3FD1]/15 text-[#5B3FD1] font-semibold dark:bg-[#5B3FD1]/30 dark:text-purple-300 shadow-2xs"
+                                    : "text-slate-600 hover:bg-slate-200/40 hover:text-slate-900 dark:text-slate-400 dark:hover:bg-white/5 dark:hover:text-white"
+                                )}
+                              >
+                                <span className="size-1.5 rounded-full bg-slate-400 dark:bg-slate-500 shrink-0" />
+                                <span className="truncate">{c.name}</span>
+                              </Link>
+                            );
+                          })}
+                        {(admin || seeAll) && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setCampaignModalBrand(b);
+                            }}
+                            className="h-6 w-full px-2 rounded-md flex items-center gap-1.5 text-[11px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition-colors cursor-pointer"
+                          >
+                            <Plus className="size-3" />
+                            <span>Add campaign</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           )}
-          <Item href="/guide" icon={CircleHelp} label="Help & getting started" tour="nav-help" active={on("/guide")} />
-        </div>
 
-        <div className="flex items-center gap-2 border-t border-line px-3 py-3">
-          <Avatar name={name} size={28} />
-          <div className="min-w-0 flex-1 leading-tight">
-            <div className="truncate text-[13px]">{name}</div>
-            <div className="truncate text-[11px] text-side-muted" title={email}>{ROLE_LABEL[role] ?? role}</div>
+          {/* Administration */}
+          {(admin || seeAll) && (
+            <>
+              <SectionLabel
+                title="Manage"
+                open={openAdmin}
+                onToggle={() => setOpenAdmin((o) => !o)}
+              />
+              {openAdmin && (
+                <div className="space-y-0.5">
+                  {admin && <NavRow href="/team" icon={Users} label="Team members" active={path === "/team"} />}
+                  {admin && <NavRow href="/brands" icon={Tags} label="Brands registry" active={path === "/brands"} />}
+                  {admin && <NavRow href="/automations" icon={Zap} label="Automations" active={path === "/automations"} />}
+                  {seeAll && <NavRow href="/archive" icon={CheckCheck} label="Completed archive" active={path === "/archive"} />}
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Quick Help & Invite */}
+          <div className="pt-2 border-t border-stone-200/70 dark:border-[#2C3B53]/70 space-y-0.5">
+            <NavRow
+              href="/team"
+              icon={UserPlus}
+              label="Invite teammates"
+              active={false}
+            />
+            <NavRow
+              href="/automations"
+              icon={CircleHelp}
+              label="Help & getting started"
+              active={false}
+            />
           </div>
-          <span data-tour="theme"><ThemeToggle /></span>
-          <button onClick={() => signOut({ callbackUrl: "/login" })} className="rounded-md p-1.5 text-side-muted hover:bg-side-hover hover:text-side-fg" title="Sign out">
-            <LogOut className="h-4 w-4" />
+        </div>
+      </nav>
+
+      {/* Footer User Row */}
+      <div className="border-t border-stone-200/90 px-3 py-2.5 dark:border-[#2C3B53]">
+        <div className="flex items-center gap-2">
+          <Avatar name={name} size={26} />
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="truncate text-[12.5px] font-semibold text-slate-900 dark:text-white">{name}</div>
+            <div className="truncate text-[10.5px] text-slate-500 font-mono" title={email}>
+              {ROLE_LABEL[role] ?? role}
+            </div>
+          </div>
+          <ThemeToggle />
+          <button
+            onClick={() => signOut({ callbackUrl: "/login" })}
+            className="rounded p-1 text-slate-400 hover:text-rose-600 transition-colors"
+            title="Sign out"
+          >
+            <LogOut className="size-4" />
           </button>
         </div>
-      </aside>
-    </>
+      </div>
+
+      {/* Create / Add Brand Modal */}
+      <CreateBrandModal
+        isOpen={createBrandModalOpen}
+        onClose={() => setCreateBrandModalOpen(false)}
+      />
+
+      {/* Create / Add Campaign Modal */}
+      {campaignModalBrand && (
+        <CreateCampaignModal
+          isOpen={!!campaignModalBrand}
+          onClose={() => setCampaignModalBrand(null)}
+          brandId={campaignModalBrand.id}
+          brandName={campaignModalBrand.name}
+          brands={brands.map((b) => ({ id: b.id, name: b.name }))}
+          onCreated={(c) => {
+            router.refresh();
+            router.push(`/brands/${c.brandId}?campaign=${c.id}`);
+          }}
+        />
+      )}
+    </aside>
   );
 }

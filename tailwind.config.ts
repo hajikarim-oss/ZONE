@@ -11,9 +11,17 @@ const config: Config = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ["var(--font-inter)", "ui-sans-serif", "system-ui", "sans-serif"],
+        sans: ["var(--font-sans)", "var(--font-inter)", "ui-sans-serif", "system-ui", "sans-serif"],
+        editorial: ["var(--font-editorial)", "Newsreader", "Georgia", "serif"],
+        mono: ["var(--font-mono)", "JetBrains Mono", "ui-monospace", "monospace"],
       },
       colors: {
+        apollo: {
+          yellow: "#FFE600",
+          yellowHover: "#F2DC00",
+          canvas: "#FAF9F5",
+          dark: "#18181B",
+        },
         surface: v("surface"),
         canvas: v("canvas"),
         line: v("line"),
@@ -33,6 +41,7 @@ const config: Config = {
         },
       },
       boxShadow: {
+        xs: "0 1px 2px 0 rgba(0, 0, 0, 0.05)",
         panel: "-8px 0 24px -12px rgba(0,0,0,0.25)",
         pop: "0 8px 24px -8px rgba(0,0,0,0.30)",
       },

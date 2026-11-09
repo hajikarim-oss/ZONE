@@ -17,28 +17,38 @@ export function dropPatch(t: TaskDTO, to: BoardKey): Record<string, unknown> | n
   const patch: Record<string, unknown> = t.onHold ? { onHold: false } : {};
   const reopen = () => {
     if (DELIVERED.includes(t.deliveryStatus)) patch.deliveryStatus = "Not Started";
+    if (t.finalApproval === "Approved") patch.finalApproval = "Pending";
   };
-  if (to === "upcoming") {
+
+  if (to === "open" || to === "upcoming") {
     reopen();
     if (t.editStatus !== "Not Started") patch.editStatus = "Not Started";
-    if (t.finalApproval === "Approved") patch.finalApproval = "Pending";
     if (t.shootStatus === "Footage Received" || t.shootStatus === "Done") patch.shootStatus = "Scheduled";
-  }
-  if (to === "ongoing") {
+  } else if (to === "submitted" || to === "ongoing") {
     reopen();
-    if (from !== "onhold" || boardColumn({ ...t, onHold: false }) !== "ongoing") patch.editStatus = "In Progress";
-  }
-  if (to === "revision") {
+    patch.editStatus = "In Progress";
+  } else if (to === "approval") {
     reopen();
-    // Each move into Revision is a new round (R1…R4); admins hear at round 3.
-    const round = Math.min(4, t.revisionRound + 1);
+    patch.editStatus = "First Cut Sent";
+    patch.clientReview = "Pending";
+  } else if (to === "feedback" || to === "revision") {
+    reopen();
+    // Each move into Revision/Feedback is a new round (R1…R4); admins hear at round 3.
+    const round = Math.min(4, Math.max(1, t.revisionRound + 1));
     patch.editStatus = `External Revision R${round}`;
     patch.revisionRound = round;
-    if (t.finalApproval === "Approved") patch.finalApproval = "Pending";
-  }
-  if (to === "completed") {
+  } else if (to === "done" || to === "completed") {
+    // Permanent completed state: sets both final approval AND delivery
     patch.editStatus = "Final Approved";
+    patch.finalApproval = "Approved";
     patch.deliveryStatus = "Files Sent";
+    patch.onHold = false;
+  } else if (to === "reopened") {
+    // Client changes their mind after final approval
+    patch.editStatus = "Reopened";
+    patch.finalApproval = "Pending";
+    patch.deliveryStatus = "Not Started";
+    patch.clientReview = "Pending";
     patch.onHold = false;
   }
   return Object.keys(patch).length ? patch : null;

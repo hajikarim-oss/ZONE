@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ExternalLink, FolderOpen, HardDrive, Link2, Paperclip, Plus, X } from "lucide-react";
+import { Check, ChevronDown, ExternalLink, FolderOpen, HardDrive, Link2, Paperclip, Plus, Sparkles, X } from "lucide-react";
 import { useState } from "react";
 import Avatar from "@/components/Avatar";
 import {
@@ -10,6 +10,50 @@ import {
 import { driveConfigured, pickFromDrive } from "@/lib/drive-picker";
 import type { PersonDTO, StorageDTO } from "@/lib/dto";
 import { cn, toInputDate } from "@/lib/utils";
+
+export const PIPELINE_TEMPLATES = [
+  {
+    name: "Reels / Shorts (5 steps)",
+    icon: "🎬",
+    tasks: [
+      "Footage Ingestion & A-Roll Assembly",
+      "B-Roll, Sound FX & Beat Sync",
+      "Motion Graphics, Captions & Text Hooks",
+      "Color Grading & Audio Mastering",
+      "Final Export & Verification Check",
+    ],
+  },
+  {
+    name: "YouTube Long-Form (5 steps)",
+    icon: "📹",
+    tasks: [
+      "Footage Sorting & Audio Cleanup",
+      "Story Assembly & Rough Cut",
+      "Pacing, Visual Hooks & B-Roll",
+      "Sound Design & Motion Lower-Thirds",
+      "Thumbnail Draft & Master Export",
+    ],
+  },
+  {
+    name: "Ad Creative Variations (4 steps)",
+    icon: "⚡",
+    tasks: [
+      "Hook 1, 2, 3 Variation Cuts",
+      "Core Pitch & Problem-Solution Narrative",
+      "Offer & Call-To-Action Graphics",
+      "Aspect Ratio Exports (9:16 & 1:1)",
+    ],
+  },
+  {
+    name: "Client Feedback Fixes (3 steps)",
+    icon: "🔄",
+    tasks: [
+      "Implement Client Feedback & Trims",
+      "Color & Audio Corrections",
+      "Final Review Version Export",
+    ],
+  },
+];
 
 const sectionTitle = "mb-1.5 mt-6 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-muted";
 
@@ -32,6 +76,8 @@ export function Subtasks({
   const [title, setTitle] = useState("");
   const [assignee, setAssignee] = useState("");
   const [due, setDue] = useState("");
+  const [templatesOpen, setTemplatesOpen] = useState(false);
+  const [applying, setApplying] = useState(false);
   const list = items ?? [];
   const done = list.filter((s) => s.done).length;
   const active = people.filter((p) => p.active);
@@ -63,12 +109,90 @@ export function Subtasks({
       });
   }
 
+  async function applyTemplate(tplTasks: string[]) {
+    setTemplatesOpen(false);
+    setApplying(true);
+    try {
+      for (const t of tplTasks) {
+        const tmp: SubtaskDTO = { id: `tmp-${Date.now()}-${Math.random()}`, title: t, assigneeId: null, dueDate: null, done: false };
+        setItems((xs) => [...xs, tmp]);
+        const saved = await addSubtask(projectId, { title: t, assigneeId: null, dueDate: null });
+        setItems((xs) => xs.map((x) => (x.id === tmp.id ? saved : x)));
+      }
+    } catch (e) {
+      onError("Couldn't add all template steps");
+    } finally {
+      setApplying(false);
+    }
+  }
+
   return (
     <>
-      <h3 className={sectionTitle}>
-        Subtasks
-        {list.length > 0 && <span className="font-normal normal-case tracking-normal">{done}/{list.length} done</span>}
-      </h3>
+      <div className="mb-1.5 mt-5 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-[12px] font-bold uppercase tracking-wider text-slate-500 dark:text-slate-400">
+            Child Issues / Subtasks
+          </span>
+          {list.length > 0 && (
+            <span className="text-[11px] font-semibold text-slate-600 dark:text-slate-300 bg-slate-100 dark:bg-white/10 px-2 py-0.5 rounded-full">
+              {done}/{list.length} done
+            </span>
+          )}
+        </div>
+
+        {canEdit && (
+          <div className="relative">
+            <button
+              type="button"
+              disabled={applying}
+              onClick={() => setTemplatesOpen((o) => !o)}
+              className="inline-flex items-center gap-1.5 h-6 px-2 text-[11.5px] font-semibold text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-950/40 rounded transition-colors cursor-pointer"
+            >
+              <Sparkles className="size-3" />
+              <span>{applying ? "Adding steps..." : "Apply Template"}</span>
+              <ChevronDown className="size-3" />
+            </button>
+
+            {templatesOpen && (
+              <div className="absolute right-0 top-full mt-1 w-64 rounded-xl border border-stone-200 bg-white p-1.5 shadow-pop z-30 dark:border-[#2C3B53] dark:bg-[#161B22]">
+                <div className="px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400">
+                  Select Pipeline Preset
+                </div>
+                <div className="space-y-0.5">
+                  {PIPELINE_TEMPLATES.map((tpl) => (
+                    <button
+                      key={tpl.name}
+                      type="button"
+                      onClick={() => applyTemplate(tpl.tasks)}
+                      className="w-full text-left px-2.5 py-1.5 rounded-md hover:bg-slate-100 dark:hover:bg-white/10 transition-colors flex items-center gap-2 cursor-pointer"
+                    >
+                      <span className="text-sm">{tpl.icon}</span>
+                      <div className="min-w-0 flex-1">
+                        <div className="text-[12px] font-semibold text-slate-800 dark:text-slate-200 truncate">
+                          {tpl.name}
+                        </div>
+                        <div className="text-[10px] text-slate-400 truncate">
+                          {tpl.tasks.length} standard milestone steps
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {list.length > 0 && (
+        <div className="mb-2.5 h-1.5 w-full rounded-full bg-slate-100 dark:bg-white/10 overflow-hidden">
+          <div
+            className="h-full bg-emerald-500 transition-all duration-300"
+            style={{ width: `${Math.round((done / list.length) * 100)}%` }}
+          />
+        </div>
+      )}
+
       {items === null && <p className="text-[12px] text-muted">Loading…</p>}
       <div className="divide-y divide-line/70 rounded-md border border-line">
         {list.map((s) => (

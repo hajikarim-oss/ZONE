@@ -29,10 +29,11 @@ export default function TaskCards({
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
 }) {
   const [collapsed, setCollapsed] = useState<Record<string, boolean>>({});
+  const visibleGroups = groups.filter((g) => g.tasks.length > 0 || groups.length === 1);
 
   return (
     <div className="space-y-1 pb-6">
-      {groups.map((g) => (
+      {visibleGroups.map((g) => (
         <section key={g.key}>
           {(groups.length > 1 || g.label) && (
             <button

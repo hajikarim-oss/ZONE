@@ -19,24 +19,24 @@ export type Access = {
 export const isAdmin = (v: Viewer) => v.role === "ADMIN";
 export const canSeeAll = (v: Viewer) => v.role === "ADMIN" || v.role === "MANAGER";
 export const canManageTeam = (v: Viewer) => v.role === "ADMIN";
-export const canManageBrands = (v: Viewer) => v.role === "ADMIN";
+export const canManageBrands = (v: Viewer) => v.role === "ADMIN" || v.role === "MANAGER";
 // Everyone on the team can add tasks; team members' tasks are assigned to themselves.
 export const canCreateProjects = (_v: Viewer) => true;
 
 // Fields the assignee may change on their task.
 // (deliveryStatus / finalApproval so they can move their task to Completed or reopen it.)
-export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold", "deliveryStatus", "finalApproval"]);
+export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold", "deliveryStatus", "finalApproval", "workType"]);
 // Extra fields a team member may change on a task they created themselves.
-export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "internalDeadline", "priority", "type", "platform", "context", "assigneeId"]);
+export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "campaignId", "internalDeadline", "priority", "type", "platform", "context", "assigneeId", "version", "cost"]);
 // Anyone working on a task can fill in these working details.
-export const WORK_FIELDS = new Set(["startAt", "endAt", "storageId"]);
+export const WORK_FIELDS = new Set(["startAt", "endAt", "storageId", "workType"]);
 
 const isOnTask = (v: Viewer, p: Access) =>
   p.assigneeId === v.id || p.createdById === v.id || !!p.collaboratorIds?.includes(v.id);
 const inWorkspace = (v: Viewer, p: Access) => !!p.brandId && !!v.brandIds?.includes(p.brandId);
 
 export function canViewProject(v: Viewer, p: Access) {
-  return canSeeAll(v) || isOnTask(v, p) || !!p.subtaskAssigneeIds?.includes(v.id) || inWorkspace(v, p);
+  return canSeeAll(v) || isOnTask(v, p) || !!p.subtaskAssigneeIds?.includes(v.id);
 }
 
 export function canEditField(v: Viewer, field: string, p: Access) {
@@ -66,8 +66,8 @@ export function myTasksFilter(userId: string) {
   };
 }
 
-// Prisma filter: everything a team member can see — My tasks plus every task
-// in the brand workspaces they're a member of.
+// Prisma filter: what a team member can see.
+// Each person sees only their own tasks even on a shared brand workspace.
 export function visibleToMember(userId: string) {
-  return { OR: [...myTasksFilter(userId).OR, { brand: { members: { some: { id: userId } } } }] };
+  return myTasksFilter(userId);
 }

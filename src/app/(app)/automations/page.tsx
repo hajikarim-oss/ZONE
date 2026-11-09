@@ -7,6 +7,7 @@ import {
   ARCHIVE_AFTER_DAYS, BRAND_NUDGE_DAYS, DEADLINE_ALERT_DAYS, ESCALATE_AFTER, REVISION_ALERT_ROUND, STALE_DAYS,
 } from "@/lib/constants";
 import { fmtDateTime } from "@/lib/utils";
+import { isEmailEnabled, REDIRECT_ALL_EMAILS_TO } from "@/lib/mailer";
 import RunNowButton, { TestEmailButton } from "./run-now";
 
 // Everything the old Apps Script did, in one place: what fires on an edit,
@@ -45,7 +46,7 @@ export default async function AutomationsPage() {
   const me = await requireTeamPage();
   if (!isAdmin(me)) redirect("/home");
   const runs = await prisma.automationRun.findMany({ orderBy: { ranAt: "desc" }, take: 15 });
-  const smtp = Boolean(process.env.SMTP_HOST);
+  const smtp = isEmailEnabled();
   const cron = Boolean(process.env.CRON_SECRET);
 
   return (
@@ -60,7 +61,13 @@ export default async function AutomationsPage() {
         <div className="mt-5 flex flex-wrap gap-2 text-[12px]">
           <span className={smtp ? "rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700" : "rounded-full bg-amber-50 px-2.5 py-1 text-amber-700"}>
             <Mail className="mr-1 inline h-3 w-3" />
-            {smtp ? `Email sending is on (from ${process.env.SMTP_FROM || process.env.SMTP_USER})` : "Email not set up (SMTP_* in .env): only in-app notifications go out"}
+            {smtp
+              ? REDIRECT_ALL_EMAILS_TO
+                ? `Email trap active: all outgoing emails redirect to ${REDIRECT_ALL_EMAILS_TO}`
+                : `Email sending is on (from ${process.env.SMTP_FROM || process.env.SMTP_USER})`
+              : process.env.DISABLE_EMAIL_NOTIFICATIONS === "true"
+                ? "Email notifications are disabled (paused): only in-app notifications go out"
+                : "Email not set up (SMTP_* in .env): only in-app notifications go out"}
           </span>
           <span className={cron ? "rounded-full bg-emerald-50 px-2.5 py-1 text-emerald-700" : "rounded-full bg-amber-50 px-2.5 py-1 text-amber-700"}>
             <CalendarClock className="mr-1 inline h-3 w-3" />

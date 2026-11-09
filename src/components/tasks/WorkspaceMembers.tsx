@@ -41,7 +41,7 @@ export default function WorkspaceMembers({
 
   return (
     <div className="relative">
-      <button onClick={() => setOpen((x) => !x)} className="btn-ghost gap-2 border border-line px-2 py-1 text-[12px]" title="Workspace members">
+      <button onClick={() => setOpen((x) => !x)} className="h-7 px-2.5 rounded-md border border-stone-200 bg-white hover:bg-slate-50 text-[11.5px] font-medium text-slate-800 shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22] dark:text-slate-200 inline-flex items-center gap-2 transition-all whitespace-nowrap shrink-0 select-none cursor-pointer" title="Workspace members">
         <span className="flex -space-x-1.5">
           {members.slice(0, 4).map((m) => (
             <span key={m.id} className="rounded-full ring-2 ring-surface">
@@ -50,10 +50,10 @@ export default function WorkspaceMembers({
           ))}
         </span>
         {members.length === 0 ? <Users className="h-4 w-4" /> : null}
-        {members.length} member{members.length === 1 ? "" : "s"}
+        <span>{members.length} member{members.length === 1 ? "" : "s"}</span>
       </button>
       {open && (
-        <div className="absolute right-0 top-full z-30 mt-1 w-72 rounded-lg border border-line bg-surface p-3 shadow-pop">
+        <div className="absolute right-0 top-full z-30 mt-1.5 w-72 rounded-xl border border-line bg-surface p-3.5 shadow-pop">
           <p className="mb-2 text-[12px] text-muted">Members see every task in this workspace and can add teammates.</p>
           <div className="max-h-60 space-y-1 overflow-y-auto">
             {members.length === 0 && <p className="text-[12px] text-muted">No members yet.</p>}
