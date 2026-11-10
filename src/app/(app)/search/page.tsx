@@ -1,10 +1,13 @@
 import type { Prisma } from "@prisma/client";
 import { Suspense } from "react";
+import Link from "next/link";
+import { HardDrive } from "lucide-react";
 import TaskWorkspace from "@/components/tasks/TaskWorkspace";
 import { requireTeamPage } from "@/lib/auth";
 import { canSeeAll } from "@/lib/rbac";
 import { SAVED_SEARCHES } from "@/lib/saved-searches";
 import { loadWorkspace } from "@/lib/workspace";
+import rawStorageData from "@/data/storage-management.json";
 
 const DELIVERED = ["Files Sent", "Invoice Raised", "Project Closed"];
 
@@ -57,19 +60,40 @@ export default async function SearchPage({ searchParams }: { searchParams: Promi
   };
 
   const hasQuery = !!p || !!term;
-  const data = await loadWorkspace(me, hasQuery ? where : { id: "__none__" });
+  const data = await loadWorkspace(me, hasQuery ? where : { archived: false });
+
+  const matchingStorage = term
+    ? ((rawStorageData as any[]) || []).filter((item) => {
+        const task = (item.task || "").toLowerCase();
+        const drive = (item.storageName || "").toLowerCase();
+        const loc = (item.dataLocation || "").toLowerCase();
+        const qL = term.toLowerCase();
+        return task.includes(qL) || drive.includes(qL) || loc.includes(qL);
+      })
+    : [];
 
   return (
     <Suspense>
       <TaskWorkspace
         key={`${preset}|${term}`}
-        title={p ? p.label : term ? `Search: “${term}”` : "Search"}
+        title={p ? p.label : term ? `Search: “${term}”` : "Search & Find Deliverables"}
         subtitle={
           hasQuery
             ? `${data.tasks.length} deliverable${data.tasks.length === 1 ? "" : "s"} · ${
                 (p && PRESET_DESCRIPTIONS[p.key]) || "Filtered production view"
               }`
-            : "Type in the search box at the top, or pick a saved search in the sidebar."
+            : `Showing all ${data.tasks.length} active studio deliverables · Type in search or select a filter preset to refine`
+        }
+        headerExtra={
+          matchingStorage.length > 0 ? (
+            <Link
+              href="/analytics#section-storage"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-indigo-200 bg-indigo-50 px-2.5 py-1 text-[11px] font-bold text-indigo-700 hover:bg-indigo-100 transition dark:border-indigo-900 dark:bg-indigo-950/40 dark:text-indigo-300 shadow-2xs"
+            >
+              <HardDrive className="size-3.5" />
+              <span>{matchingStorage.length} Drive &amp; Storage Matches</span>
+            </Link>
+          ) : undefined
         }
         mode="all"
         showDoneDefault={preset === "completed-week" || !!term}

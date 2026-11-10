@@ -13,6 +13,7 @@ import Avatar from "@/components/Avatar";
 import { ROLE_LABEL } from "@/lib/constants";
 import CreateIssueModal from "./jira/CreateIssueModal";
 import CreateBrandModal from "./brands/CreateBrandModal";
+import UniversalSearchModal from "./search/UniversalSearchModal";
 import type { BrandDTO, PersonDTO } from "@/lib/dto";
 import { cn } from "@/lib/utils";
 
@@ -41,6 +42,7 @@ export default function TopBar({
   const [brandPickerOpen, setBrandPickerOpen] = useState(false);
   const [createModalOpen, setCreateModalOpen] = useState(false);
   const [createBrandOpen, setCreateBrandOpen] = useState(false);
+  const [searchModalOpen, setSearchModalOpen] = useState(false);
 
   const menuRef = useRef<HTMLDivElement>(null);
   const brandPickerRef = useRef<HTMLDivElement>(null);
@@ -51,7 +53,7 @@ export default function TopBar({
   const activeBrandId = brandMatch ? brandMatch[1] : null;
   const currentBrand = activeBrandId ? brands.find((b) => b.id === activeBrandId) : null;
 
-  // Shortcuts: "/" or "mod+k" focuses search, "c" opens create issue dialog
+  // Shortcuts: "/" or "mod+k" opens universal search, "c" opens create issue dialog
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
       const t = e.target as HTMLElement;
@@ -61,7 +63,7 @@ export default function TopBar({
         !t.isContentEditable
       ) {
         e.preventDefault();
-        inputRef.current?.focus();
+        setSearchModalOpen(true);
       }
       if (e.key === "c" && !["INPUT", "TEXTAREA", "SELECT"].includes(t.tagName) && !t.isContentEditable) {
         e.preventDefault();
@@ -221,25 +223,30 @@ export default function TopBar({
             <span>Studio Live</span>
           </div>
 
-          {/* Search Trigger */}
-          <div className="relative hidden md:block">
-            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-            <input
-              ref={inputRef}
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && q.trim()) {
-                  router.push(`/search?q=${encodeURIComponent(q.trim())}`);
-                }
-              }}
-              placeholder="Search deliverables..."
-              className="h-7 w-36 lg:w-48 rounded-md border border-stone-200/90 bg-white/80 py-1 pl-8 pr-8 text-[12px] text-slate-900 outline-none transition-all placeholder:text-slate-400 hover:border-slate-400 focus:w-60 focus:border-[#FFE600] focus:ring-1 focus:ring-[#FFE600] dark:border-[#2C3B53] dark:bg-[#161B22] dark:text-white"
-            />
+          {/* Universal Search Trigger (Desktop) */}
+          <div
+            onClick={() => setSearchModalOpen(true)}
+            className="relative hidden md:flex items-center cursor-pointer group select-none"
+            title="Universal Search for drives, projects, files & team (⌘K)"
+          >
+            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400 group-hover:text-slate-700 dark:group-hover:text-slate-200 transition-colors" />
+            <div className="h-7 w-44 lg:w-56 rounded-md border border-stone-200/90 bg-white/80 py-1 pl-8 pr-8 text-[12px] text-slate-400 transition-all group-hover:border-[#FFE600] group-hover:bg-white flex items-center shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22] dark:text-slate-400 dark:group-hover:border-[#FFE600]">
+              <span className="truncate">Search drives &amp; projects...</span>
+            </div>
             <kbd className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 rounded border border-stone-300/80 bg-stone-100 px-1 py-0.2 font-mono text-[9px] font-semibold text-slate-500 dark:border-[#2C3B53] dark:bg-[#0F141C]">
               ⌘K
             </kbd>
           </div>
+
+          {/* Universal Search Trigger (Mobile icon) */}
+          <button
+            type="button"
+            onClick={() => setSearchModalOpen(true)}
+            className="md:hidden flex items-center justify-center size-7 rounded-md text-slate-600 hover:text-slate-900 hover:bg-slate-200/60 dark:text-slate-300 dark:hover:bg-white/10 transition-colors cursor-pointer"
+            title="Search drives & projects"
+          >
+            <Search className="size-4" />
+          </button>
 
           {/* Notifications Bell */}
           <Link
@@ -331,6 +338,13 @@ export default function TopBar({
       <CreateBrandModal
         isOpen={createBrandOpen}
         onClose={() => setCreateBrandOpen(false)}
+      />
+
+      {/* Universal Search Modal (Drives, Projects, Files, Brands, Team) */}
+      <UniversalSearchModal
+        isOpen={searchModalOpen}
+        onClose={() => setSearchModalOpen(false)}
+        initialQuery={q}
       />
     </>
   );

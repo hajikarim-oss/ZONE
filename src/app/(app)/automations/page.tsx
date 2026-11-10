@@ -8,7 +8,8 @@ import {
 } from "@/lib/constants";
 import { fmtDateTime } from "@/lib/utils";
 import { isEmailEnabled, REDIRECT_ALL_EMAILS_TO } from "@/lib/mailer";
-import RunNowButton, { TestEmailButton } from "./run-now";
+import RunNowButton, { SmartReminderSimulator, TestEmailButton } from "./run-now";
+import { fmtDate } from "@/lib/utils";
 
 // Everything the old Apps Script did, in one place: what fires on an edit,
 // what runs every morning, who gets what, and a log of daily runs.
@@ -45,7 +46,14 @@ const LABELS: Record<string, string> = {
 export default async function AutomationsPage() {
   const me = await requireTeamPage();
   if (!isAdmin(me)) redirect("/home");
-  const runs = await prisma.automationRun.findMany({ orderBy: { ranAt: "desc" }, take: 15 });
+  const [runs, activeTasks] = await Promise.all([
+    prisma.automationRun.findMany({ orderBy: { ranAt: "desc" }, take: 15 }),
+    prisma.project.findMany({
+      where: { archived: false },
+      include: { brand: true, assignee: true, campaign: true, createdBy: true },
+      take: 20,
+    }),
+  ]);
   const smtp = isEmailEnabled();
   const cron = Boolean(process.env.CRON_SECRET);
 
@@ -79,6 +87,24 @@ export default async function AutomationsPage() {
             In-app notifications always on (sidebar → Notifications)
           </span>
         </div>
+
+        {/* Smart Reminder & Escalation Simulator (Slack × Jira Style) */}
+        <section className="mt-8">
+          <SmartReminderSimulator
+            tasks={activeTasks.map((t) => ({
+              id: t.id,
+              code: t.code,
+              title: t.title,
+              brandName: t.brand?.name ?? "Brand",
+              campaignName: t.campaign?.name ?? "General",
+              assigneeName: t.assignee?.name ?? "Unassigned",
+              assignerName: t.createdBy?.name ?? "Reporting Manager",
+              deadline: t.internalDeadline ? fmtDate(t.internalDeadline, true) : "Deadline Pending",
+              status: t.editStatus,
+              priority: t.priority,
+            }))}
+          />
+        </section>
 
         <section className="mt-8">
           <h2 className="mb-2 flex items-center gap-2 text-[15px] font-semibold"><Zap className="h-4 w-4 text-accent" /> Instant (when a task changes)</h2>

@@ -6,14 +6,26 @@ import { revalidatePath } from "next/cache";
 import { after } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { requireTeamUser } from "@/lib/auth";
-import { canCreateProjects, canEditField, canManageBrands, canManageCollaborators, canManageTeam, canSeeAll, canViewProject, isAdmin, type Access } from "@/lib/rbac";
+import { canCreateProjects, canDeleteProject, canEditField, canManageBrands, canManageCollaborators, canManageTeam, canSeeAll, canViewProject, isAdmin, type Access } from "@/lib/rbac";
 import {
   BRIEF_STAGES, CLIENT_REVIEW, DELIVERY_STATUSES, DEPARTMENTS, DEPTS, EDIT_STATUSES, FINAL_APPROVAL,
   PREPRO_STAGES, PRIORITIES, REVISION_ALERT_ROUND, ROLES, SCRIPT_STAGES, SHOOT_STATUSES,
 } from "@/lib/constants";
 import { forViewer, taskInclude, toTaskDTO, type StorageDTO, type TaskDTO, type TimeEntryDTO } from "@/lib/dto";
 export type { TimeEntryDTO } from "@/lib/dto";
-import { notify, onAssigned, onClosed, onFinalApproved, onFirstCutSent, onRevisionAlert, onTimelineRevised, onWorkSessionStarted, onWorkSessionStopped } from "@/lib/notify";
+import {
+  notify,
+  onAssigned,
+  onClosed,
+  onFinalApproved,
+  onFirstCutSent,
+  onRevisionAlert,
+  onTimelineRevised,
+  onWorkSessionStarted,
+  onWorkSessionStopped,
+  sendSmartReminderStage,
+  type SmartReminderStage,
+} from "@/lib/notify";
 import { APP_URL, emailHtml, isEmailEnabled, sendMail } from "@/lib/mailer";
 import { runDailyAutomations, type DailyResult } from "@/lib/automations";
 import {
@@ -231,8 +243,13 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
     });
   }
 
-  // On-edit automations
-  if (after.assigneeId && after.assigneeId !== before.assigneeId) await onAssigned(after, me);
+  // On-edit automations: send Smart Assignment & Deadline Card when assignee or deadline is set by manager
+  const deadlineChanged =
+    "internalDeadline" in patch &&
+    String(after.internalDeadline?.toISOString() ?? "") !== String(before.internalDeadline?.toISOString() ?? "");
+  if (after.assigneeId && (after.assigneeId !== before.assigneeId || deadlineChanged)) {
+    await onAssigned(after, me);
+  }
   if (after.editStatus === "First Cut Sent" && before.editStatus !== "First Cut Sent") await onFirstCutSent(after);
   if (after.revisionRound >= REVISION_ALERT_ROUND && before.revisionRound < REVISION_ALERT_ROUND) await onRevisionAlert(after);
   if (after.finalApproval === "Approved" && before.finalApproval !== "Approved") await onFinalApproved(after);
@@ -428,7 +445,9 @@ export async function removeCollaborator(projectId: string, userId: string): Pro
 
 export async function setArchived(id: string, archived: boolean) {
   const me = await requireTeamUser();
-  if (!canSeeAll(me)) throw new Error("Not allowed");
+  const p = await prisma.project.findUnique({ where: { id }, include: taskInclude });
+  if (!p) throw new Error("Task not found");
+  if (!canDeleteProject(me, access(p))) throw new Error("Not allowed");
   await prisma.project.update({ where: { id }, data: { archived } });
   later("archive history", () =>
     prisma.activity.create({ data: { projectId: id, actorName: me.name, field: archived ? "Moved to Completed" : "Moved back to active" } }),
@@ -437,7 +456,30 @@ export async function setArchived(id: string, archived: boolean) {
 
 export async function deleteTask(id: string) {
   const me = await requireTeamUser();
-  if (!isAdmin(me)) throw new Error("Only admins can delete tasks");
+  const p = await prisma.project.findUnique({ where: { id }, include: taskInclude });
+  if (!p) throw new Error("Task not found");
+  if (!canDeleteProject(me, access(p))) throw new Error("You can only delete tasks you own or created");
+  // Point 2 & 3 Anti-tamper check: Goal-linked tasks keep audit trail for non-admins/managers
+  if (!canSeeAll(me) && p.brandId) {
+    const linkedGoals = await prisma.goal.count({
+      where: {
+        OR: [{ brandId: p.brandId }, { ownerId: me.id }],
+        status: { not: "Achieved" },
+      },
+    });
+    if (linkedGoals > 0) {
+      await prisma.project.update({ where: { id }, data: { archived: true } });
+      await prisma.activity.create({
+        data: {
+          projectId: id,
+          actorName: me.name,
+          field: "Goal-Linked Archive",
+          toValue: "Task archived (Goal-linked tasks keep audit history)",
+        },
+      });
+      return;
+    }
+  }
   later("delete from google calendar", () => deleteProjectFromGoogleCalendar(id));
   await prisma.project.delete({ where: { id } });
 }
@@ -733,10 +775,13 @@ export async function createTeamUser(input: { name: string; email: string; role:
   return { ok: true };
 }
 
-export async function updateTeamUser(id: string, patch: { role?: string; department?: string; active?: boolean; name?: string }) {
+export async function updateTeamUser(
+  id: string,
+  patch: { role?: string; department?: string; active?: boolean; name?: string; hourlyRate?: number | null }
+) {
   const me = await requireTeamUser();
   if (!canManageTeam(me)) throw new Error("Only admins can change people");
-  if (id === me.id && (patch.role && patch.role !== "ADMIN" || patch.active === false))
+  if (id === me.id && ((patch.role && patch.role !== "ADMIN") || patch.active === false))
     throw new Error("You can't demote or deactivate yourself");
   const data: Record<string, unknown> = {};
   if (patch.role !== undefined) {
@@ -749,6 +794,9 @@ export async function updateTeamUser(id: string, patch: { role?: string; departm
   }
   if (patch.active !== undefined) data.active = patch.active;
   if (patch.name !== undefined && patch.name.trim()) data.name = patch.name.trim();
+  if (patch.hourlyRate !== undefined) {
+    data.hourlyRate = patch.hourlyRate === null ? null : Math.max(0, Math.round(Number(patch.hourlyRate)));
+  }
   await prisma.user.update({ where: { id }, data });
   revalidatePath("/", "layout");
 }
@@ -870,6 +918,26 @@ export async function runAutomationsNow(): Promise<DailyResult> {
   const r = await runDailyAutomations(`Run now by ${me.name}`, { weekly: true });
   revalidatePath("/", "layout");
   return r;
+}
+
+// Trigger any of the 7 Smart Reminder & Escalation stages on demand (for testing or manual escalation)
+export async function triggerSmartReminderStageAction(
+  projectId: string,
+  stage: SmartReminderStage
+): Promise<{ ok: boolean; message: string }> {
+  const me = await requireTeamUser();
+  if (!canSeeAll(me)) throw new Error("Only admins and managers can trigger smart reminder stages");
+  const p = await prisma.project.findUnique({
+    where: { id: projectId },
+    include: { brand: true, assignee: true, campaign: true, createdBy: true },
+  });
+  if (!p) throw new Error("Deliverable not found");
+  await sendSmartReminderStage(p, stage, { assignerName: me.name, assignerEmail: me.email });
+  revalidatePath("/", "layout");
+  return {
+    ok: true,
+    message: `Dispatched [${stage}] Slack/Jira reminder for ${p.code} (${p.title}).`,
+  };
 }
 
 // "Send test email" on the Automations page — goes to the admin clicking it.

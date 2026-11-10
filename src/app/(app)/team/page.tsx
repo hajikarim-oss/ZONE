@@ -32,6 +32,7 @@ export default async function TeamPage() {
             role: u.role,
             department: u.department,
             active: u.active,
+            hourlyRate: u.hourlyRate ?? 300,
             openTasks: u.assigned.filter((p) => !isDone(p as any)).length,
             createdAt: u.createdAt.toISOString(),
           }))}

@@ -30,6 +30,7 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
   const [targetAssigneeId, setTargetAssigneeId] = useState<string>("");
   const [quickAssignPerson, setQuickAssignPerson] = useState<PersonDTO | null>(null);
   const [quickAssignTaskId, setQuickAssignTaskId] = useState<string>("");
+  const [selectedMemberView, setSelectedMemberView] = useState<PersonDTO | null>(null);
   const [isPending, startTransition] = useTransition();
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
 
@@ -215,15 +216,22 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
                       : "border-emerald-200 bg-emerald-50/40 dark:border-emerald-900/50 dark:bg-emerald-950/20"
                   )}
                 >
-                  {/* Top: Member name, avatar & live status */}
+                  {/* Top: Member name (CLICKABLE per Point 5), avatar & live status */}
                   <div className="flex items-center justify-between gap-1.5 min-w-0">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMemberView(p)}
+                      className="flex items-center gap-2 min-w-0 text-left group/member cursor-pointer"
+                      title={`Click to open ${p.name}'s individual tasks, live work & logged time`}
+                    >
                       <Avatar name={p.name} size={22} />
                       <div className="min-w-0">
-                        <div className="truncate font-semibold text-ink text-[12px]">{p.name}</div>
+                        <div className="truncate font-semibold text-ink text-[12px] group-hover/member:text-[#0052CC] group-hover/member:underline transition-colors">
+                          {p.name}
+                        </div>
                         <div className="text-[10px] text-muted truncate">{p.department || "Editor"}</div>
                       </div>
-                    </div>
+                    </button>
 
                     {currentTask ? (
                       <div className="shrink-0 flex items-center gap-1">
@@ -375,15 +383,22 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
                   key={p.id}
                   className="grid grid-cols-[180px_repeat(13,1fr)] items-center transition hover:bg-canvas/40"
                 >
-                  {/* Person Col */}
+                  {/* Person Col (CLICKABLE per Point 5) */}
                   <div className="flex items-center justify-between p-2 pl-3">
-                    <div className="flex items-center gap-2 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedMemberView(p)}
+                      className="flex items-center gap-2 min-w-0 text-left group/rowmember cursor-pointer"
+                      title={`Open ${p.name}'s individual tasks, live session & logged hours`}
+                    >
                       <Avatar name={p.name} size={24} />
                       <div className="min-w-0">
-                        <div className="truncate text-[13px] font-medium text-ink">{p.name}</div>
+                        <div className="truncate text-[13px] font-semibold text-ink group-hover/rowmember:text-[#0052CC] group-hover/rowmember:underline transition-colors">
+                          {p.name}
+                        </div>
                         <div className="text-[10px] text-muted">{p.department || "Editor"}</div>
                       </div>
-                    </div>
+                    </button>
                     <span
                       className={cn(
                         "rounded px-1.5 py-0.5 text-[10px] font-semibold",
@@ -767,6 +782,215 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
           </form>
         </div>
       )}
+
+      {/* Point 5 Modal: Team Member Individual View (Individual tasks, what they're working on right now, and time logged on each task) */}
+      {selectedMemberView && (() => {
+        const memberAllTasks = tasks.filter((t) => t.assigneeId === selectedMemberView.id);
+        const memberActiveTasks = memberAllTasks.filter((t) => !isDone(t));
+        const memberDoneTasks = memberAllTasks.filter((t) => isDone(t));
+        const workingRightNowTask =
+          memberActiveTasks.find(
+            (t) => t.editStatus === "In Progress" || (t.startAt && !t.endAt)
+          ) || getPersonHourTask(selectedMemberView.id, defaultHour());
+        const totalLoggedMinutes = memberAllTasks.reduce(
+          (sum, t) => sum + (t.totalDurationMinutes || 0),
+          0
+        );
+
+        return (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm"
+            onClick={() => setSelectedMemberView(null)}
+          >
+            <div
+              className="w-full max-w-3xl max-h-[85vh] flex flex-col rounded-xl border border-line bg-surface shadow-2xl overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="flex items-center justify-between border-b border-line px-5 py-4 bg-canvas/50">
+                <div className="flex items-center gap-3">
+                  <Avatar name={selectedMemberView.name} size={38} />
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="text-[16px] font-bold text-ink">{selectedMemberView.name}</h3>
+                      <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[11px] font-semibold text-blue-700 dark:text-blue-300">
+                        {selectedMemberView.department || "Post-Production"}
+                      </span>
+                    </div>
+                    <p className="text-[12px] text-muted">
+                      Individual Tasks, Current Live Work & Time Logged Per Deliverable
+                    </p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <div className="text-right hidden sm:block">
+                    <div className="text-[10px] font-bold uppercase tracking-wider text-muted">
+                      Total Time Logged
+                    </div>
+                    <div className="font-mono text-[15px] font-bold text-[#0052CC]">
+                      {(totalLoggedMinutes / 60).toFixed(1)} hrs ({totalLoggedMinutes}m)
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setSelectedMemberView(null)}
+                    className="p-1.5 rounded-lg text-muted hover:text-ink hover:bg-canvas cursor-pointer"
+                  >
+                    ✕
+                  </button>
+                </div>
+              </div>
+
+              {/* Body */}
+              <div className="flex-1 overflow-y-auto p-5 space-y-5">
+                {/* 1. What They're Working On Right Now */}
+                <div className="rounded-xl border border-amber-300/80 dark:border-amber-800/70 bg-amber-50/50 dark:bg-amber-950/20 p-4 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <span className="inline-flex items-center gap-1.5 text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-300">
+                      <span className="size-2 rounded-full bg-amber-500 animate-pulse" />
+                      Working On Right Now
+                    </span>
+                    {workingRightNowTask && (
+                      <span className="font-mono text-[11.5px] font-bold text-ink">
+                        ⏱️ {(workingRightNowTask.totalDurationMinutes / 60).toFixed(1)}h logged on this task
+                      </span>
+                    )}
+                  </div>
+
+                  {workingRightNowTask ? (
+                    <div className="flex flex-wrap items-center justify-between gap-3 pt-1">
+                      <div>
+                        <div className="text-[14px] font-bold text-ink">
+                          [{workingRightNowTask.brandName || "Brand"}] {workingRightNowTask.title}
+                        </div>
+                        <div className="text-[12px] text-muted mt-0.5">
+                          Stage: <strong className="text-ink">{workingRightNowTask.editStatus}</strong> ·
+                          Campaign: <strong className="text-ink">{workingRightNowTask.campaignName || "General"}</strong> ·
+                          Due: <strong className="text-ink">{workingRightNowTask.internalDeadline ? fmtDate(workingRightNowTask.internalDeadline) : "Not set"}</strong>
+                        </div>
+                      </div>
+                      <Link
+                        href={
+                          workingRightNowTask.brandId
+                            ? `/brands/${workingRightNowTask.brandId}?task=${workingRightNowTask.id}`
+                            : `/projects?task=${workingRightNowTask.id}`
+                        }
+                        className="btn-primary text-[12px] py-1.5 px-3"
+                      >
+                        Open Live Task ↗
+                      </Link>
+                    </div>
+                  ) : (
+                    <div className="text-[12.5px] text-emerald-700 dark:text-emerald-400 font-medium">
+                      Currently free / no active timer running right now.
+                    </div>
+                  )}
+                </div>
+
+                {/* 2. Individual Tasks & Time Logged Table */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <h4 className="text-[12px] font-bold uppercase tracking-wider text-muted">
+                      Individual Tasks & Time Logged ({memberAllTasks.length} total · {memberActiveTasks.length} active · {memberDoneTasks.length} completed)
+                    </h4>
+                  </div>
+
+                  {memberAllTasks.length === 0 ? (
+                    <div className="rounded-lg border border-line p-6 text-center text-[13px] text-muted">
+                      No tasks currently assigned to {selectedMemberView.name}.
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-line overflow-hidden">
+                      <table className="w-full text-left border-collapse text-[12.5px]">
+                        <thead>
+                          <tr className="border-b border-line bg-canvas text-[10.5px] font-bold uppercase tracking-wider text-muted">
+                            <th className="py-2.5 px-3">Deliverable / Task</th>
+                            <th className="py-2.5 px-3">Brand / Campaign</th>
+                            <th className="py-2.5 px-3">Status</th>
+                            <th className="py-2.5 px-3">Due Date</th>
+                            <th className="py-2.5 px-3 text-right">Time Logged</th>
+                            <th className="py-2.5 px-3 text-right">Action</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-line/60">
+                          {memberAllTasks.map((t) => {
+                            const hrs = ((t.totalDurationMinutes || 0) / 60).toFixed(1);
+                            const completed = isDone(t);
+                            return (
+                              <tr key={t.id} className="hover:bg-canvas/50">
+                                <td className="py-2.5 px-3">
+                                  <div className={cn("font-semibold text-ink", completed && "line-through text-muted")}>
+                                    {t.title}
+                                  </div>
+                                  <div className="text-[10.5px] font-mono text-muted">{t.code}</div>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <div className="font-medium text-ink">{t.brandName || "—"}</div>
+                                  <div className="text-[10.5px] text-muted">{t.campaignName || ""}</div>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap">
+                                  <span
+                                    className={cn(
+                                      "rounded-full px-2 py-0.5 text-[10.5px] font-bold",
+                                      completed
+                                        ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                                        : t.editStatus === "In Progress"
+                                          ? "bg-amber-500/15 text-amber-700 dark:text-amber-300"
+                                          : "bg-slate-200/70 dark:bg-white/10 text-muted"
+                                    )}
+                                  >
+                                    {t.editStatus}
+                                  </span>
+                                </td>
+                                <td className="py-2.5 px-3 whitespace-nowrap text-muted text-[11.5px]">
+                                  {t.internalDeadline ? fmtDate(t.internalDeadline) : "—"}
+                                </td>
+                                <td className="py-2.5 px-3 text-right whitespace-nowrap font-mono font-bold text-[#0052CC]">
+                                  {hrs}h <span className="text-[10.5px] font-normal text-muted">({t.totalDurationMinutes || 0}m)</span>
+                                </td>
+                                <td className="py-2.5 px-3 text-right whitespace-nowrap">
+                                  <Link
+                                    href={
+                                      t.brandId
+                                        ? `/brands/${t.brandId}?task=${t.id}`
+                                        : `/projects?task=${t.id}`
+                                    }
+                                    className="text-[11.5px] font-bold text-[#0052CC] hover:underline"
+                                  >
+                                    Open ↗
+                                  </Link>
+                                </td>
+                              </tr>
+                            );
+                          })}
+                        </tbody>
+                      </table>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Footer */}
+              <div className="flex items-center justify-between border-t border-line px-5 py-3 bg-canvas/40">
+                <Link
+                  href={`/projects?assignee=${selectedMemberView.id}`}
+                  className="text-[12px] font-bold text-[#0052CC] hover:underline"
+                >
+                  Open Full Filtered Board for {selectedMemberView.name} ↗
+                </Link>
+                <button
+                  type="button"
+                  onClick={() => setSelectedMemberView(null)}
+                  className="btn-primary text-[12px] px-4 py-1.5"
+                >
+                  Close View
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }

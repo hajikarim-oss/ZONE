@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
-import { adminUsers, alertFoundersOverdue, notify } from "@/lib/notify";
+import { adminUsers, alertFoundersOverdue, notify, sendSmartReminderStage } from "@/lib/notify";
 import { taskInclude, toTaskDTO } from "@/lib/dto";
 import { computeDelay, computeStage, daysBetween, isDone, startOfToday, waitingOn } from "@/lib/status";
 import {
@@ -37,186 +37,230 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
   // On-hold tasks are paused: no reminders, deadline alerts or brand nudges.
   const active = projects.filter((p) => !isDone(p) && !p.onHold);
 
-  // ── 1. Overdue deadline reminders (Editor -> Manager -> Admin escalation) ──
-  // Feedback: "Reminders follow the deadline. If a video passes its internal deadline,
-  // the editor or POC is reminded first. If it stays late, the manager is told next;
-  // if still late, the admin is told. Admins are not copied on every small delay."
-  const overdueTasks = active.filter((p) => {
-    if (!p.assignee || !p.assignee.active) return false;
-    if (waitingOn(p) === "BRAND") return false; // Ball is with the brand, not the editor
-    const dl = p.internalDeadline ? startOfToday(p.internalDeadline) : null;
-    return dl !== null && dl < today;
-  });
+  // ── 1. Unified Daily Digest Email (Points 8, 9, 10: Overdue Escalation L1/L2/L3 + Inactive Tasks + Missing Details + Budget Alerts) ──
+  const allTeamUsers = await prisma.user.findMany({ where: { active: true } });
+  const allTeamEmails = allTeamUsers.map((u) => u.email);
 
-  const byPerson = new Map<string, typeof active>();
-  for (const p of overdueTasks) {
-    byPerson.set(p.assignee!.id, [...(byPerson.get(p.assignee!.id) ?? []), p]);
+  // Group per-person digest items so each person receives ONE summarized email covering all their alerts
+  type DigestRow = [string, string, string, string, string];
+  const personDigests = new Map<
+    string,
+    {
+      user: { id: string; name: string; email: string };
+      maxEscalationLevel: number;
+      rows: DigestRow[];
+    }
+  >();
+
+  const ensureDigest = (u: { id: string; name: string; email: string }) => {
+    if (!personDigests.has(u.id)) {
+      personDigests.set(u.id, { user: u, maxEscalationLevel: 1, rows: [] });
+    }
+    return personDigests.get(u.id)!;
+  };
+
+  for (const p of active) {
+    // Point 9b: Unassigned task -> notify Admin so it gets allocated
+    if (!p.assignee || !p.assignee.active) {
+      for (const adm of admins) {
+        const d = ensureDigest(adm);
+        d.rows.push([
+          p.title,
+          p.brand?.name ?? "—",
+          "🚨 UNASSIGNED TASK",
+          computeStage(p).label,
+          "Allocate owner",
+        ]);
+      }
+      continue;
+    }
+
+    const person = p.assignee;
+    const dl = p.internalDeadline ? startOfToday(p.internalDeadline) : null;
+    const isOverdue = waitingOn(p) !== "BRAND" && dl !== null && dl < today;
+
+    // Point 8: Overdue Escalation (L1: Assignee -> L2: Manager + Assignee -> L3: Admin + Team)
+    if (isOverdue) {
+      await prisma.project.update({
+        where: { id: p.id },
+        data: { reminderCount: { increment: 1 } },
+      });
+      const level = p.reminderCount + 1;
+      const d = ensureDigest(person);
+      d.maxEscalationLevel = Math.max(d.maxEscalationLevel, level);
+      d.rows.push([
+        p.title,
+        p.brand?.name ?? "—",
+        level === 1
+          ? "⏰ OVERDUE (Level 1 · Assignee)"
+          : level === 2
+            ? "⚠️ OVERDUE (Level 2 · Manager & Assignee)"
+            : "🚨 OVERDUE (Level 3 · Admin & Team)",
+        computeStage(p).label,
+        fmtDate(p.internalDeadline) || "Past due",
+      ]);
+    }
+
+    // Point 9a: No movement / Inactivity alert (2 days urgent/high, 3 days medium, 6 days long-running)
+    const daysInactive = daysBetween(p.updatedAt, today);
+    const inactivityLimit =
+      p.priority === "urgent" || p.priority === "high" ? 2 : p.priority === "medium" ? 3 : 6;
+    if (daysInactive >= inactivityLimit) {
+      const d = ensureDigest(person);
+      d.rows.push([
+        p.title,
+        p.brand?.name ?? "—",
+        `⏳ INACTIVE (${daysInactive}d no movement)`,
+        computeStage(p).label,
+        `Limit: ${inactivityLimit}d`,
+      ]);
+    }
+
+    // Point 9c: Missing required details alert
+    const missing: string[] = [];
+    if (!p.internalDeadline) missing.push("Due Date");
+    if (!p.campaignId) missing.push("Campaign");
+    if (!p.storageId) missing.push("Hard Drive");
+    if (!p.context?.trim()) missing.push("Description");
+    if (!p.workType) missing.push("Work Type");
+    if (missing.length > 0) {
+      const d = ensureDigest(person);
+      d.rows.push([
+        p.title,
+        p.brand?.name ?? "—",
+        `⚠️ MISSING DETAILS: ${missing.join(", ")}`,
+        computeStage(p).label,
+        "Fill required fields",
+      ]);
+    }
+
+    // Point 10: Budget Alerts (50% Manager, 75% Manager+Admin, 90%+ Admin + Red Flag)
+    const totalMinutes = p.timeEntries.reduce((sum, e) => sum + e.durationMinutes, 0);
+    const totalHours = totalMinutes / 60;
+    const estCost = totalHours * 400; // ₹300 labor + ₹100 overhead baseline
+    const budget = 50000;
+    const budgetPct = Math.round((estCost / budget) * 100);
+    if (budgetPct >= 50) {
+      const alertLabel =
+        budgetPct >= 90
+          ? `🚨 ${budgetPct}% BUDGET USED (Flagged Red)`
+          : budgetPct >= 75
+            ? `⚠️ ${budgetPct}% BUDGET USED (75%+ Alert)`
+            : `ℹ️ ${budgetPct}% BUDGET USED (50%+ Notice)`;
+      for (const mgr of managers) {
+        ensureDigest(mgr).rows.push([
+          p.title,
+          p.brand?.name ?? "—",
+          alertLabel,
+          computeStage(p).label,
+          `${budgetPct}% of ₹${budget.toLocaleString("en-IN")}`,
+        ]);
+      }
+      if (budgetPct >= 75) {
+        for (const adm of admins) {
+          ensureDigest(adm).rows.push([
+            p.title,
+            p.brand?.name ?? "—",
+            alertLabel,
+            computeStage(p).label,
+            `${budgetPct}% of ₹${budget.toLocaleString("en-IN")}`,
+          ]);
+        }
+      }
+    }
   }
 
-  for (const [, list] of byPerson) {
-    const person = list[0].assignee!;
-    await prisma.project.updateMany({ where: { id: { in: list.map((p) => p.id) } }, data: { reminderCount: { increment: 1 } } });
-    const level = Math.max(...list.map((p) => p.reminderCount + 1));
-    
-    // Level 1: Editor / POC only
-    // Level 2: Manager alerted next
-    // Level 3+: Admin alerted
+  // Send ONE consolidated digest email per person (Points 8, 9, 10)
+  for (const [, digest] of personDigests) {
+    if (digest.rows.length === 0) continue;
+    const { user: person, maxEscalationLevel: level, rows } = digest;
+
     let ccEmails: string[] | undefined = undefined;
-    let subjectPrefix = "⏰ Overdue: ";
+    let subjectPrefix = "📋 Daily Task & Alert Digest: ";
     if (level === 2 && managerEmails.length) {
       ccEmails = managerEmails;
-      subjectPrefix = "⚠️ Overdue (Manager alerted): ";
+      subjectPrefix = "⚠️ Level 2 Escalation Digest (Manager + Assignee): ";
       result.escalated++;
     } else if (level >= 3 && adminEmails.length) {
-      ccEmails = [...new Set([...managerEmails, ...adminEmails])];
-      subjectPrefix = `🚨 Critical delay #${level} (Admin alerted): `;
+      ccEmails = [...new Set([...adminEmails, ...managerEmails, ...allTeamEmails])];
+      subjectPrefix = `🚨 Level 3 Critical Escalation Digest (Admin + Team): `;
       result.escalated++;
     }
 
-    const subject = `${subjectPrefix}${list.length} task${list.length > 1 ? "s" : ""} past due date`;
-    const sorted = [...list].sort((a, b) => (a.internalDeadline?.getTime() ?? 0) - (b.internalDeadline?.getTime() ?? 0));
-
+    const subject = `${subjectPrefix}${rows.length} item${rows.length > 1 ? "s" : ""} requiring attention`;
     await sendMail(
       person.email,
       subject,
       emailHtml({
-        heading: `Hi ${person.name.split(" ")[0]}, deadline update required`,
-        intro: level === 1
-          ? "These deliverables have passed their internal due date. Please update their progress or complete them so the team stays on schedule."
-          : level === 2
-          ? "These deliverables remain overdue. Managers have been alerted to help resolve any blockers."
-          : "These deliverables are critically delayed. Studio leadership has been notified.",
-        head: ["Task", "Brand", "Campaign", "Stage", "Due Date"],
-        rows: sorted.map((p) => [p.title, p.brand?.name ?? "—", p.campaign?.name ?? "—", computeStage(p).label, fmtDate(p.internalDeadline) || "—"]),
-        cta: { label: "Update my tasks", href: `${APP_URL}/my-tasks` },
+        heading: `Hi ${person.name.split(" ")[0]}, your consolidated TBM Portal digest`,
+        intro:
+          "Here is your single summarized daily digest covering overdue tasks (L1/L2/L3 escalation), inactive tasks, missing mandatory task details, and project budget alerts:",
+        head: ["Task / Project", "Brand", "Alert Type & Missing Gaps", "Stage", "Status / Due"],
+        rows,
+        cta: { label: "Open My Tasks & Fix Highlighted Gaps", href: `${APP_URL}/my-tasks` },
       }),
-      ccEmails,
+      ccEmails
     );
     await notify(person.id, subject, undefined, "/my-tasks");
     result.reminders++;
   }
 
-  // ── 2. Deadline Countdown Alerts (24h, 10h, 2h) & Founder Escalations ──
-  const nowMs = now.getTime();
+  // ── 2. Smart Deadline Reminder & Escalation Pipeline (Slack × Jira Style) ──
+  // Pipeline:
+  //   • T-24h before deadline -> Team Member (structured Slack/Jira card)
+  //   • Deadline Day 10:00 AM -> Team Member morning check-in
+  //   • Deadline Day 6:00 PM -> Team Member evening window check-in (6 PM - 8 PM)
+  //   • Deadline Day 8:00 PM (if nothing changed between 6 PM and 8 PM) -> Team Member urgent progress reminder
+  //   • Next Morning 10:00 AM (1 day past deadline) -> Reporting Manager Escalation (24h window to act)
+  //   • +24h after Manager Escalation with no action -> All 6 Founders (Pratik, Suraj, Sachin, Uday, Suraj Maurya, Monu)
+  const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const istHour = istNow.getHours();
+  const today6PmMs = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate(), 18, 0, 0).getTime();
 
   for (const p of active) {
     if (!p.assignee?.active || !p.internalDeadline) continue;
-    const dueMs = p.internalDeadline.getTime();
-    const diffHours = (dueMs - nowMs) / (1000 * 60 * 60);
+    const dlDay = startOfToday(p.internalDeadline);
+    const dayDiff = daysBetween(today, dlDay); // +1 = due tomorrow (T-24h), 0 = due today, -1 = due yesterday (Next Morning 10 AM Manager), <= -2 = +24h after Manager (Founders)
+    const hoursSinceLastUpdate = (now.getTime() - p.updatedAt.getTime()) / (1000 * 60 * 60);
 
-    // Case 1: Post-Deadline Breach (+24 Hours Overdue without response)
-    // -> Alert Assignee, Assigner, and ESCALATE TO ALL FOUNDERS (Suraj, Pratik, Sachin, Uday)
-    if (diffHours <= -24) {
-      // 1. Alert Assignee
-      await notify(
-        p.assignee.id,
-        `🚨 CRITICAL OVERDUE: ${p.title} (+24h)`,
-        `Deliverable is 24h+ overdue without an updated timeline. Founders have been alerted.`,
-        `/my-tasks?task=${p.id}`
-      );
-      // 2. Alert Assigner
-      if (p.createdById && p.createdById !== p.assigneeId) {
-        await notify(
-          p.createdById,
-          `⚠️ OVERDUE 24H: ${p.title}`,
-          `Assigned to ${p.assignee.name} · No response received in 24 hours.`,
-          `/projects?task=${p.id}`
-        );
-      }
-      // 3. Escalate to Founders: Suraj, Pratik, Sachin, Uday
-      await alertFoundersOverdue({
-        id: p.id,
-        title: p.title,
-        code: p.code,
-        brandName: p.brand?.name,
-        assigneeName: p.assignee.name,
-        overdueHours: Math.abs(Math.round(diffHours)),
-      });
+    // Stage 6: 24h after Manager Reminder with NO action -> Escalate to ALL 6 FOUNDERS (Pratik, Suraj, Sachin, Uday, Suraj Maurya, Monu)
+    if (dayDiff <= -2 && hoursSinceLastUpdate >= 24) {
+      await sendSmartReminderStage(p, "FOUNDER_24H_ESCALATION");
       result.escalated++;
       continue;
     }
 
-    // Case 2: 2 Hours to Deadline (Final Call before Breach)
-    if (diffHours > 0 && diffHours <= 2) {
-      await notify(
-        p.assignee.id,
-        `🚨 CRITICAL (2H): ${p.title}`,
-        `Only 2 hours remaining until deadline! Confirm delivery or request timeline extension immediately.`,
-        `/my-tasks?task=${p.id}`
-      );
-      await sendMail(
-        p.assignee.email,
-        `🚨 CRITICAL: 2 Hours to deadline for ${p.title}`,
-        emailHtml({
-          heading: `Final Call: ${p.title} is due in 2 hours`,
-          intro: `Hi ${p.assignee.name.split(" ")[0]}, you have less than 2 hours remaining until your scheduled delivery deadline. If you cannot finish on time, please submit a revised timeline with a note immediately to prevent client escalation:`,
-          head: ["Field", "Details"],
-          rows: [
-            ["Deliverable", `${p.code} · ${p.title}`],
-            ["Brand", p.brand?.name ?? "—"],
-            ["Internal Deadline", fmtDate(p.internalDeadline, true)],
-            ["Client Air Date", p.externalDeadline ? fmtDate(p.externalDeadline) : "Not set"],
-          ],
-          cta: { label: "Confirm On Track or Revise Timeline", href: `${APP_URL}/my-tasks?task=${p.id}` },
-        })
-      );
-      result.deadlineAlerts++;
+    // Stage 5: Next Morning at 10:00 AM IST (1 day past deadline) -> Reporting Manager gets reminder
+    if (dayDiff === -1) {
+      await sendSmartReminderStage(p, "NEXT_DAY_10AM_MANAGER");
+      result.escalated++;
       continue;
     }
 
-    // Case 3: 10 Hours to Deadline (Urgent Countdown)
-    if (diffHours > 2 && diffHours <= 10) {
-      await notify(
-        p.assignee.id,
-        `⏰ URGENT (10H): ${p.title}`,
-        `10 hours remaining until deadline. Please confirm you are on track or revise timeline.`,
-        `/my-tasks?task=${p.id}`
-      );
-      await sendMail(
-        p.assignee.email,
-        `⏰ URGENT: 10 Hours to deadline for ${p.title}`,
-        emailHtml({
-          heading: `Urgent: ${p.title} is due today (10h remaining)`,
-          intro: `Hi ${p.assignee.name.split(" ")[0]}, your internal deadline is in approximately 10 hours. If your progress is blocked or you need more time, please request a revised timeline with a note now:`,
-          head: ["Field", "Details"],
-          rows: [
-            ["Deliverable", `${p.code} · ${p.title}`],
-            ["Brand", p.brand?.name ?? "—"],
-            ["Internal Deadline", fmtDate(p.internalDeadline, true)],
-            ["Client Air Date", p.externalDeadline ? fmtDate(p.externalDeadline) : "Not set"],
-          ],
-          cta: { label: "Confirm On Track or Revise Timeline", href: `${APP_URL}/my-tasks?task=${p.id}` },
-        })
-      );
-      result.deadlineAlerts++;
+    // Stages 2, 3, 4: Same Day of Deadline (10:00 AM -> 6:00 PM -> 8:00 PM if nothing changed since 6 PM)
+    if (dayDiff === 0) {
+      if (istHour >= 20) {
+        // 8:00 PM check: did anything change between 6:00 PM and 8:00 PM?
+        const updatedSince6Pm = p.updatedAt.getTime() >= today6PmMs;
+        if (!updatedSince6Pm) {
+          await sendSmartReminderStage(p, "DEADLINE_8PM_NO_CHANGE");
+          result.deadlineAlerts++;
+        }
+      } else if (istHour >= 16) {
+        // 6:00 PM check-in
+        await sendSmartReminderStage(p, "DEADLINE_6PM");
+        result.deadlineAlerts++;
+      } else {
+        // 10:00 AM morning check-in
+        await sendSmartReminderStage(p, "DEADLINE_10AM");
+        result.deadlineAlerts++;
+      }
       continue;
     }
 
-    // Case 4: 24 Hours to Deadline (First Check-In)
-    if (diffHours > 10 && diffHours <= 24) {
-      await notify(
-        p.assignee.id,
-        `⏳ 24h to deadline: ${p.title}`,
-        `Delivery due tomorrow. Please confirm progress or request a revised timeline.`,
-        `/my-tasks?task=${p.id}`
-      );
-      await sendMail(
-        p.assignee.email,
-        `⏳ 24h to delivery deadline: ${p.title}`,
-        emailHtml({
-          heading: `Check-in: ${p.title} is due tomorrow`,
-          intro: `Hi ${p.assignee.name.split(" ")[0]}, your internal delivery deadline for "${p.title}" is in 24 hours (${fmtDate(p.internalDeadline)}). Please confirm you are on track or request a timeline change so management can balance resources:`,
-          head: ["Field", "Details"],
-          rows: [
-            ["Deliverable", `${p.code} · ${p.title}`],
-            ["Brand", p.brand?.name ?? "—"],
-            ["Internal Deadline", fmtDate(p.internalDeadline, true)],
-            ["Client Air Date", p.externalDeadline ? fmtDate(p.externalDeadline) : "Not set"],
-          ],
-          cta: { label: "Confirm On Track or Revise Timeline", href: `${APP_URL}/my-tasks?task=${p.id}` },
-          footer: "Please confirm your delivery status as early as possible so management can balance studio resources.",
-        })
-      );
+    // Stage 1: 24 Hours Before Deadline (T-24h) -> Clear, defined Slack/Jira card to Team Member
+    if (dayDiff === 1) {
+      await sendSmartReminderStage(p, "BEFORE_24H");
       result.deadlineAlerts++;
       continue;
     }
@@ -272,9 +316,10 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
   });
   result.archived = arch.count;
 
-  // ── 5. Monday weekly report ──
+  // ── 5. Monday weekly report + Weekly Goal Achievement Report (Point 2) ──
   const istDay = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" })).getDay();
-  if ((istDay === 1 || opts.weekly) && adminEmails.length) {
+  const weeklyRecipients = [...new Set([...adminEmails, ...managerEmails])];
+  if ((istDay === 1 || opts.weekly) && weeklyRecipients.length) {
     const dtos = projects.map(toTaskDTO);
     const act = dtos.filter((t) => !isDone(t));
     const delays = act.map((t) => ({ t, d: computeDelay(t) })).filter((x) => x.d);
@@ -283,18 +328,40 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
     const weekEnd = new Date(today);
     weekEnd.setDate(today.getDate() + 7);
     const dueThisWeek = act.filter((t) => t.internalDeadline && new Date(t.internalDeadline) <= weekEnd && new Date(t.internalDeadline) >= today);
+
+    const goals = await prisma.goal.findMany({
+      include: { owner: { select: { name: true } }, brand: { select: { name: true } } },
+    });
+    const achievedGoals = goals.filter((g) => g.status === "Achieved" || g.progress >= 100);
+    const unachievedGoals = goals.filter((g) => g.status !== "Achieved" && g.progress < 100);
+
     await sendMail(
-      adminEmails,
-      `📊 Weekly post-production report — ${act.length} active, ${delays.length} late`,
+      weeklyRecipients,
+      `📊 Weekly Studio & Goal Achievement Report — ${achievedGoals.length}/${goals.length} goals achieved, ${act.length} active`,
       emailHtml({
-        heading: "Your week in post-production",
-        intro: `Active: ${act.length}\nLate (team): ${delays.filter((x) => x.d!.who === "EDITOR").length}\nWaiting on brand: ${delays.filter((x) => x.d!.who === "BRAND").length}\nDelivered in the last 7 days: ${deliveredThisWeek.length}\nDue this week: ${dueThisWeek.length}`,
-        head: ["Late project", "Brand", "Assignee", "Who", "Days"],
-        rows: delays
-          .sort((a, b) => b.d!.days - a.d!.days)
-          .slice(0, 20)
-          .map(({ t, d }) => [t.title, t.brandName ?? "—", t.assigneeName ?? "Unassigned", d!.who === "EDITOR" ? "Team" : "Brand", String(d!.days)]),
-        cta: { label: "Open dashboard", href: `${APP_URL}/home` },
+        heading: "Your week in post-production & Goal Achievement",
+        intro: `Goals Achieved: ${achievedGoals.length} of ${goals.length}\nGoals Not Yet Achieved: ${unachievedGoals.length}\nActive Deliverables: ${act.length}\nLate (team): ${delays.filter((x) => x.d!.who === "EDITOR").length}\nDelivered in the last 7 days: ${deliveredThisWeek.length}\nDue this week: ${dueThisWeek.length}`,
+        head: ["Goal / Deliverable", "Brand", "Owner / Assignee", "Status", "Progress / Delay"],
+        rows: [
+          ...goals.map((g) => [
+            `🎯 GOAL: ${g.title}`,
+            g.brand?.name ?? "Studio-wide",
+            g.owner?.name ?? "Team",
+            g.status === "Achieved" || g.progress >= 100 ? "✓ ACHIEVED" : `⏳ NOT ACHIEVED (${g.status})`,
+            `${g.progress}%`,
+          ]),
+          ...delays
+            .sort((a, b) => b.d!.days - a.d!.days)
+            .slice(0, 15)
+            .map(({ t, d }) => [
+              t.title,
+              t.brandName ?? "—",
+              t.assigneeName ?? "Unassigned",
+              d!.who === "EDITOR" ? "Late (Team)" : "Waiting on Brand",
+              `${d!.days}d late`,
+            ]),
+        ],
+        cta: { label: "Open Goals & Studio Dashboard", href: `${APP_URL}/goals` },
       }),
     );
     result.weekly = true;

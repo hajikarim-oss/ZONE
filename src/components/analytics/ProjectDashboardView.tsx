@@ -36,7 +36,9 @@ import {
   Search,
   SlidersHorizontal,
   ArrowUpDown,
+  HardDrive,
 } from "lucide-react";
+import DriveAndProjectSection from "@/components/analytics/DriveAndProjectSection";
 import Avatar from "@/components/Avatar";
 import { JiraStatusLozenge, JiraIssueKey, JiraIssueTypeIcon } from "@/components/jira/JiraBits";
 import { SectionBar, StatStrip, Stat } from "@/components/layout/Page";
@@ -72,6 +74,7 @@ export default function ProjectDashboardView({
   const [selectedAssignee, setSelectedAssignee] = useState<string>("all");
   const [hoveredSlice, setHoveredSlice] = useState<string | null>(null);
   const [inspectorPayload, setInspectorPayload] = useState<InspectorPayload | null>(null);
+  const [rightCardTab, setRightCardTab] = useState<"drives" | "stages">("drives");
 
   // Dynamic Team Member Chart Controls (Scales to N-members & N-projects)
   const [teamPage, setTeamPage] = useState<number>(0);
@@ -1096,64 +1099,117 @@ export default function ProjectDashboardView({
           </div>
         </div>
 
-        {/* CHART 2: Incomplete Deliverables by Workflow Stage (Asana Chart 2) */}
-        <div
-          id="section-stages"
-          className="scroll-mt-14 rounded-xl border border-stone-200/90 bg-white p-5 shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22] flex flex-col justify-between"
-        >
-          <div>
-            <div className="flex items-center justify-between border-b border-stone-100 dark:border-[#2C3B53] pb-3">
-              <div className="flex items-center gap-2">
-                <Layers className="size-4 text-purple-600 dark:text-purple-400" />
-                <h4 className="text-[14px] font-bold text-slate-900 dark:text-white">
-                  Deliverables by Workflow Stage
-                </h4>
+        {/* RIGHT SIDE: Drive & Project Storage Operations (From TBM Studio Storage Management) / Workflow Stages */}
+        {rightCardTab === "drives" ? (
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between pb-2 mb-1">
+              <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-[11px] font-semibold dark:border-[#2C3B53] dark:bg-white/5">
+                <button
+                  type="button"
+                  onClick={() => setRightCardTab("drives")}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1 rounded transition cursor-pointer",
+                    rightCardTab === "drives"
+                      ? "bg-white text-indigo-600 shadow-2xs dark:bg-[#161B22] dark:text-indigo-400 font-bold"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  )}
+                >
+                  <HardDrive className="size-3.5" />
+                  <span>Drive &amp; Project (42)</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setRightCardTab("stages")}
+                  className={cn(
+                    "flex items-center gap-1.5 px-3 py-1 rounded transition cursor-pointer",
+                    rightCardTab !== "drives"
+                      ? "bg-white text-purple-600 shadow-2xs dark:bg-[#161B22] dark:text-purple-400 font-bold"
+                      : "text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                  )}
+                >
+                  <Layers className="size-3.5" />
+                  <span>Pipeline Stages</span>
+                </button>
               </div>
-              <span className="text-[11px] font-mono text-slate-400">
-                {active.length} active in pipeline · Click row to land in stage
+              <span className="text-[10.5px] font-mono text-slate-400 hidden sm:inline">
+                TBM Studio Storage Management
               </span>
             </div>
-
-            {/* Stage Progress Bars */}
-            <div className="mt-4 space-y-3">
-              {stageStats.map((st) => (
-                <div
-                  key={st.key}
-                  onClick={() => router.push(`/projects?status=${st.targetStatus}`)}
-                  className="p-1.5 rounded-lg hover:bg-stone-50 dark:hover:bg-white/5 transition cursor-pointer group space-y-1"
-                >
-                  <div className="flex items-center justify-between text-[12px]">
-                    <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 group-hover:text-blue-600 transition-colors">
-                      <span className="size-2 rounded-full" style={{ backgroundColor: st.color }} />
-                      <span>{st.label}</span>
-                    </div>
-                    <div className="flex items-center gap-2 font-mono text-[11.5px]">
-                      <span className="font-bold text-slate-950 dark:text-white">{st.count}</span>
-                      <span className="text-slate-400">({st.pct}%)</span>
-                      <span className="text-slate-300 group-hover:text-blue-600 transition-colors">→</span>
-                    </div>
-                  </div>
-                  <div className="h-2 w-full rounded-full bg-stone-100 dark:bg-white/5 overflow-hidden">
-                    <div
-                      style={{
-                        width: `${Math.max(3, (st.count / maxStageCount) * 100)}%`,
-                        backgroundColor: st.color,
-                      }}
-                      className="h-full rounded-full transition-all duration-500"
-                    />
+            <DriveAndProjectSection compact className="h-full min-h-[460px]" />
+          </div>
+        ) : (
+          <div
+            id="section-stages"
+            className="scroll-mt-14 rounded-xl border border-stone-200/90 bg-white p-5 shadow-2xs dark:border-[#2C3B53] dark:bg-[#161B22] flex flex-col justify-between"
+          >
+            <div>
+              <div className="flex items-center justify-between border-b border-stone-100 dark:border-[#2C3B53] pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-1.5 rounded-lg border border-stone-200 bg-stone-100/80 p-0.5 text-[11px] font-semibold dark:border-[#2C3B53] dark:bg-white/5">
+                    <button
+                      type="button"
+                      onClick={() => setRightCardTab("drives")}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded transition cursor-pointer text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white"
+                    >
+                      <HardDrive className="size-3.5" />
+                      <span>Drive &amp; Project (42)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRightCardTab("stages")}
+                      className="flex items-center gap-1.5 px-3 py-1 rounded transition cursor-pointer bg-white text-purple-600 shadow-2xs dark:bg-[#161B22] dark:text-purple-400 font-bold"
+                    >
+                      <Layers className="size-3.5" />
+                      <span>Pipeline Stages</span>
+                    </button>
                   </div>
                 </div>
-              ))}
+                <span className="text-[11px] font-mono text-slate-400">
+                  {active.length} active in pipeline · Click row to land in stage
+                </span>
+              </div>
+
+              {/* Stage Progress Bars */}
+              <div className="mt-4 space-y-3">
+                {stageStats.map((st) => (
+                  <div
+                    key={st.key}
+                    onClick={() => router.push(`/projects?status=${st.targetStatus}`)}
+                    className="p-1.5 rounded-lg hover:bg-stone-50 dark:hover:bg-white/5 transition cursor-pointer group space-y-1"
+                  >
+                    <div className="flex items-center justify-between text-[12px]">
+                      <div className="flex items-center gap-1.5 font-semibold text-slate-800 dark:text-slate-200 group-hover:text-blue-600 transition-colors">
+                        <span className="size-2 rounded-full" style={{ backgroundColor: st.color }} />
+                        <span>{st.label}</span>
+                      </div>
+                      <div className="flex items-center gap-2 font-mono text-[11.5px]">
+                        <span className="font-bold text-slate-950 dark:text-white">{st.count}</span>
+                        <span className="text-slate-400">({st.pct}%)</span>
+                        <span className="text-slate-300 group-hover:text-blue-600 transition-colors">→</span>
+                      </div>
+                    </div>
+                    <div className="h-2 w-full rounded-full bg-stone-100 dark:bg-white/5 overflow-hidden">
+                      <div
+                        style={{
+                          width: `${Math.max(3, (st.count / maxStageCount) * 100)}%`,
+                          backgroundColor: st.color,
+                        }}
+                        className="h-full rounded-full transition-all duration-500"
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="mt-4 pt-3 border-t border-stone-100 dark:border-[#2C3B53] flex items-center justify-between text-[11px] text-slate-500">
+              <span>Stage bottleneck radar:</span>
+              <span className="font-semibold text-amber-600 dark:text-amber-400">
+                {inRevision.length > 0 ? `${inRevision.length} waiting for client fixes` : "Pipeline flowing smoothly"}
+              </span>
             </div>
           </div>
-
-          <div className="mt-4 pt-3 border-t border-stone-100 dark:border-[#2C3B53] flex items-center justify-between text-[11px] text-slate-500">
-            <span>Stage bottleneck radar:</span>
-            <span className="font-semibold text-amber-600 dark:text-amber-400">
-              {inRevision.length > 0 ? `${inRevision.length} waiting for client fixes` : "Pipeline flowing smoothly"}
-            </span>
-          </div>
-        </div>
+        )}
 
         {/* CHART 3: Cumulative Completion Velocity Over Time (Asana Chart 3) */}
         <div
@@ -1405,6 +1461,9 @@ export default function ProjectDashboardView({
           </div>
         </div>
       </div>
+
+      {/* Dedicated Studio Storage Hardware & Project File Operations */}
+      <DriveAndProjectSection />
 
       {/* Brand & Campaign Production Matrix (Scales with search, sort & pagination) */}
       <div

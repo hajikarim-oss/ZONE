@@ -23,11 +23,38 @@ export const canManageBrands = (v: Viewer) => v.role === "ADMIN" || v.role === "
 // Everyone on the team can add tasks; team members' tasks are assigned to themselves.
 export const canCreateProjects = (_v: Viewer) => true;
 
-// Fields the assignee may change on their task.
-// (deliveryStatus / finalApproval so they can move their task to Completed or reopen it.)
-export const MEMBER_FIELDS = new Set(["editStatus", "scriptStage", "revisionRound", "shootStatus", "onHold", "deliveryStatus", "finalApproval", "workType"]);
-// Extra fields a team member may change on a task they created themselves.
-export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS, "title", "brandId", "campaignId", "internalDeadline", "priority", "type", "platform", "context", "assigneeId", "version", "cost"]);
+// Point 3 Feedback: Team members have full edit rights on every field in the project panel for their tasks.
+export const MEMBER_FIELDS = new Set([
+  "title",
+  "brandId",
+  "campaignId",
+  "type",
+  "workType",
+  "version",
+  "platform",
+  "dept",
+  "assigneeId",
+  "priority",
+  "onHold",
+  "internalDeadline",
+  "externalDeadline",
+  "startAt",
+  "endAt",
+  "storageId",
+  "briefStage",
+  "scriptStage",
+  "preProStage",
+  "shootStatus",
+  "editStatus",
+  "revisionRound",
+  "clientReview",
+  "finalApproval",
+  "deliveryStatus",
+  "notes",
+  "context",
+  "cost",
+]);
+export const CREATOR_FIELDS = new Set([...MEMBER_FIELDS]);
 // Anyone working on a task can fill in these working details.
 export const WORK_FIELDS = new Set(["startAt", "endAt", "storageId", "workType"]);
 
@@ -41,9 +68,13 @@ export function canViewProject(v: Viewer, p: Access) {
 
 export function canEditField(v: Viewer, field: string, p: Access) {
   if (canSeeAll(v)) return true;
-  if (WORK_FIELDS.has(field) && (isOnTask(v, p) || inWorkspace(v, p))) return true;
-  if (p.createdById === v.id && CREATOR_FIELDS.has(field)) return true;
-  return p.assigneeId === v.id && MEMBER_FIELDS.has(field);
+  if (isOnTask(v, p) && MEMBER_FIELDS.has(field)) return true;
+  if (WORK_FIELDS.has(field) && inWorkspace(v, p)) return true;
+  return false;
+}
+
+export function canDeleteProject(v: Viewer, p: Access) {
+  return canSeeAll(v) || p.assigneeId === v.id || p.createdById === v.id;
 }
 
 export function canManageCollaborators(v: Viewer, p: Access) {

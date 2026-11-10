@@ -198,6 +198,12 @@ export default function Sidebar({
           <div className="space-y-0.5">
             <NavRow href="/home" icon={Home} label="Studio Dashboard" active={path === "/home"} />
             <NavRow
+              href="/search"
+              icon={Search}
+              label="Search & Find"
+              active={path === "/search"}
+            />
+            <NavRow
               href="/my-tasks"
               icon={CheckCircle2}
               label="Assigned to me"

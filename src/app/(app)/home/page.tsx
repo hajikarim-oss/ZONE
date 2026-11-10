@@ -129,6 +129,38 @@ export default async function HomePage() {
 
       {/* Page Content Body */}
       <PageBody className="p-5 md:p-6 space-y-6">
+        {/* Point 10: Red-Flagged Projects at ≥90% Budget Used on Studio Dashboard */}
+        {(() => {
+          const redFlagProjects = active.filter((t) => {
+            const hrs = (t.totalDurationMinutes || 0) / 60;
+            const estCost = hrs * 400; // ₹300 labor + ₹100 overhead baseline
+            const budget = 50000;
+            return (estCost / budget) * 100 >= 90;
+          });
+          if (redFlagProjects.length === 0) return null;
+          return (
+            <div className="rounded-xl border-2 border-rose-500 bg-rose-50/80 dark:bg-rose-950/30 p-3.5 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2.5 text-rose-950 dark:text-rose-200">
+                <ShieldAlert className="h-5 w-5 text-rose-600 shrink-0" />
+                <div className="text-[12.5px]">
+                  <span className="font-bold uppercase tracking-wider">
+                    🚨 Budget Critical Flag (≥90% Used):
+                  </span>{" "}
+                  {redFlagProjects.map((p) => (
+                    <Link
+                      key={p.id}
+                      href={`/projects?task=${p.id}`}
+                      className="inline-flex items-center gap-1 rounded bg-rose-600 text-white px-2 py-0.5 text-[11px] font-bold ml-1.5 hover:bg-rose-700"
+                    >
+                      {p.code} · {p.title}
+                    </Link>
+                  ))}
+                </div>
+              </div>
+            </div>
+          );
+        })()}
+
         {/* Manager Live Day Timeline (9 AM - 9 PM) */}
         {seeAll && (
           <div>

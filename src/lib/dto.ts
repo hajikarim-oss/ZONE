@@ -200,11 +200,9 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
   };
 }
 
-// Team members (MEMBER role) never receive the client deadline or internal
-// notes — stripped here on the server so they aren't even in the page data.
-export function forViewer(t: TaskDTO, seeAll: boolean): TaskDTO {
-  if (seeAll) return t;
-  return { ...t, externalDeadline: null, extDeadlineChanges: 0, notes: null };
+// Point 3 & 10: Team members see all operational task fields, while rupee hourly rates remain admin-only.
+export function forViewer(t: TaskDTO, _seeAll: boolean): TaskDTO {
+  return t;
 }
 
 export function toPeople(users: (User & { hourlyRate?: number | null })[]): PersonDTO[] {

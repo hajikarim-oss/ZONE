@@ -14,6 +14,7 @@ type TeamUser = {
   role: string;
   department: string;
   active: boolean;
+  hourlyRate: number;
   openTasks: number;
   createdAt: string;
 };
@@ -133,7 +134,12 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
     setError(null);
     start(async () => {
       try {
-        await updateTeamUser(id, { role: p.role, department: p.department, active: p.active });
+        await updateTeamUser(id, {
+          role: p.role,
+          department: p.department,
+          active: p.active,
+          hourlyRate: p.hourlyRate,
+        });
       } catch (e) {
         setRows(prev);
         setError(e instanceof Error ? e.message : "Couldn't save");
@@ -146,12 +152,14 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
       <AddForm />
       {error && <p className="rounded-md bg-rose-50 px-3 py-2 text-[12px] text-rose-700">{error}</p>}
       <div className="overflow-x-auto rounded-lg border border-line">
-        <table className="w-full min-w-[600px] text-[13px]">
+        <table className="w-full min-w-[780px] text-[13px]">
           <thead className="bg-canvas text-left text-[12px] text-muted">
             <tr>
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-2 py-2 font-medium">Department</th>
               <th className="px-2 py-2 font-medium">Role</th>
+              <th className="px-2 py-2 font-medium">Monthly Cost (₹) · 160h</th>
+              <th className="px-2 py-2 font-medium">Hourly Rate (₹/hr)</th>
               <th className="px-2 py-2 font-medium">Status</th>
               <th className="px-2 py-2 text-right font-medium">Open tasks</th>
               <th className="px-2 py-2 font-medium">Login</th>
@@ -182,6 +190,43 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
                   <select value={u.role} disabled={u.id === currentUserId} onChange={(e) => patch(u.id, { role: e.target.value })} className="cell-select">
                     {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                   </select>
+                </td>
+                <td className="px-2">
+                  <div className="flex items-center gap-1 font-mono text-[12px]">
+                    <span className="text-muted">₹</span>
+                    <input
+                      type="number"
+                      min={0}
+                      step={1000}
+                      defaultValue={(u.hourlyRate || 300) * 160}
+                      key={`${u.id}-monthly-${u.hourlyRate}`}
+                      onBlur={(e) => {
+                        const monthly = Number(e.target.value) || 0;
+                        const hr = Math.round(monthly / 160);
+                        if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
+                      }}
+                      className="w-24 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-semibold"
+                      title="Monthly cost (Admin only) — divides by 160 productive hours/month"
+                    />
+                  </div>
+                </td>
+                <td className="px-2">
+                  <div className="flex items-center gap-1 font-mono text-[12px]">
+                    <span className="text-muted">₹</span>
+                    <input
+                      type="number"
+                      min={0}
+                      defaultValue={u.hourlyRate || 300}
+                      key={`${u.id}-hr-${u.hourlyRate}`}
+                      onBlur={(e) => {
+                        const hr = Number(e.target.value) || 0;
+                        if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
+                      }}
+                      className="w-16 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-bold text-[#0052CC]"
+                      title="Hourly cost in ₹/hr (Admin only)"
+                    />
+                    <span className="text-[11px] text-muted">/hr</span>
+                  </div>
                 </td>
                 <td className="px-2">
                   <button
