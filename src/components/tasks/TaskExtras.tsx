@@ -484,187 +484,185 @@ export function Subtasks({
           return (
             <div
               key={s.id}
-              className="group flex flex-wrap sm:flex-nowrap items-center gap-2 px-2.5 py-2 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors"
+              className="group flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50/90 dark:hover:bg-white/[0.04] transition-colors"
             >
-              <button
-                type="button"
-                onClick={() => patch(s.id, { done: !s.done, status: !s.done ? "Done" : "Todo" })}
-                disabled={s.id.startsWith("tmp-")}
-                className={cn(
-                  "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border cursor-pointer",
-                  s.done
-                    ? "border-emerald-500 bg-emerald-500 text-white"
-                    : "border-muted/50 hover:border-emerald-500"
-                )}
-                title={s.done ? "Mark not done" : "Mark done"}
-              >
-                {s.done && <Check className="h-3 w-3" />}
-              </button>
-
-              {/* Title & Goal / Description icons */}
-              <button
-                type="button"
-                onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
-                className="min-w-0 flex-1 text-left flex items-center gap-1.5 cursor-pointer group/title"
-                title="Click to open full dedicated subtask sheet (Timer, Goal, Brief)"
-              >
-                <span
+              {/* Left Side: Checkbox + Title + Goal Chip + Icons */}
+              <div className="flex items-center gap-2.5 min-w-0 flex-1">
+                <button
+                  type="button"
+                  onClick={() => patch(s.id, { done: !s.done, status: !s.done ? "Done" : "Todo" })}
+                  disabled={s.id.startsWith("tmp-")}
                   className={cn(
-                    "truncate text-[13px] font-medium group-hover/title:text-[#0052CC] transition-colors",
-                    s.done && "text-muted line-through"
+                    "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border transition cursor-pointer",
+                    s.done
+                      ? "border-emerald-500 bg-emerald-500 text-white"
+                      : "border-slate-300 dark:border-slate-600 hover:border-emerald-500"
                   )}
+                  title={s.done ? "Mark as todo" : "Mark as completed"}
                 >
-                  {s.title}
-                </span>
+                  {s.done && <Check className="h-2.5 w-2.5 stroke-[3]" />}
+                </button>
 
-                {s.goalTitle && (
-                  <span className="shrink-0 rounded bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.2 text-[10px] font-semibold text-[#0052CC] dark:text-blue-300">
-                    🎯 {s.goalTitle}
+                <button
+                  type="button"
+                  onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
+                  className="min-w-0 flex items-center gap-2 text-left cursor-pointer group/title"
+                  title="Click to open full dedicated subtask sheet"
+                >
+                  <span
+                    className={cn(
+                      "text-[13px] font-medium text-slate-800 dark:text-slate-200 group-hover/title:text-[#0052CC] dark:group-hover/title:text-blue-400 transition-colors truncate",
+                      s.done && "text-muted line-through"
+                    )}
+                  >
+                    {s.title || "Untitled Subtask"}
                   </span>
-                )}
 
-                {ex.campaign && !s.goalTitle && (
-                  <span className="shrink-0 rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 px-1.5 py-0.2 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
-                    {ex.campaign}
-                  </span>
-                )}
+                  {s.goalTitle && (
+                    <span
+                      className="shrink-0 max-w-[150px] truncate rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.5 text-[10px] font-semibold text-[#0052CC] dark:text-blue-300"
+                      title={`Goal: ${s.goalTitle}`}
+                    >
+                      🎯 {s.goalTitle}
+                    </span>
+                  )}
 
-                {(s.description || ex.description) && (
-                  <span className="shrink-0 text-slate-400" title={s.description || ex.description}>
-                    <FileText className="h-3 w-3" />
-                  </span>
-                )}
-              </button>
+                  {ex.campaign && !s.goalTitle && (
+                    <span className="shrink-0 max-w-[130px] truncate rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
+                      {ex.campaign}
+                    </span>
+                  )}
 
-              {/* Status Badge Dropdown */}
-              <select
-                value={statusVal}
-                onChange={(e) => {
-                  const val = e.target.value;
-                  patch(s.id, { status: val, done: val === "Done" });
-                }}
-                className={cn(
-                  "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border border-transparent",
-                  SUBTASK_STATUS_COLORS[statusVal] || "bg-canvas text-muted"
-                )}
-                title="Subtask Status"
-              >
-                <option value="Todo">Todo</option>
-                <option value="In Progress">In Progress</option>
-                <option value="In Review">In Review</option>
-                <option value="Done">Done</option>
-              </select>
+                  {(s.description || ex.description) && (
+                    <span className="shrink-0 text-slate-400" title={s.description || ex.description}>
+                      <FileText className="h-3 w-3" />
+                    </span>
+                  )}
 
-              {/* Subtask Tracker Quick Controls */}
-              <div className="shrink-0 flex items-center gap-1">
+                  {(s.timeSpentMinutes || 0) > 0 && (
+                    <span className="shrink-0 rounded bg-slate-100 dark:bg-white/10 px-1.5 py-0.5 font-mono text-[10px] text-slate-500 font-semibold">
+                      {((s.timeSpentMinutes || 0) / 60).toFixed(1)}h
+                    </span>
+                  )}
+                </button>
+              </div>
+
+              {/* Right Side: Clean Actions & Attributes */}
+              <div className="flex items-center gap-2 shrink-0">
+                {/* Status Dropdown */}
+                <select
+                  value={statusVal}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    patch(s.id, { status: val, done: val === "Done" });
+                  }}
+                  className={cn(
+                    "rounded-full px-2 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border",
+                    SUBTASK_STATUS_COLORS[statusVal] || "bg-canvas text-muted border-line"
+                  )}
+                  title="Subtask Status"
+                >
+                  <option value="Todo">Todo</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="In Review">In Review</option>
+                  <option value="Done">Done</option>
+                </select>
+
+                {/* Live Stopwatch Icon Toggle */}
                 <button
                   type="button"
                   onClick={() => handleToggleSubtaskTimer(s.id)}
                   className={cn(
-                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-mono font-bold transition cursor-pointer",
+                    "h-6 px-1.5 rounded text-[10.5px] font-mono font-bold flex items-center gap-1 transition cursor-pointer",
                     isTimerRunning
                       ? "bg-amber-600 text-white animate-pulse"
-                      : "bg-slate-100 dark:bg-white/10 hover:bg-blue-50 text-muted hover:text-[#0052CC]"
+                      : "text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40"
                   )}
-                  title={isTimerRunning ? "Stop subtask timer & log" : "Start live subtask timer"}
+                  title={isTimerRunning ? "Stop subtask timer" : "Start live stopwatch on subtask"}
                 >
-                  {isTimerRunning ? <Pause className="h-2.5 w-2.5" /> : <Clock className="h-2.5 w-2.5" />}
-                  <span>
-                    {isTimerRunning
-                      ? fmtSeconds(subtaskTimerSeconds)
-                      : (s.timeSpentMinutes || 0) > 0
-                      ? `${((s.timeSpentMinutes || 0) / 60).toFixed(1)}h`
-                      : "Log"}
-                  </span>
+                  {isTimerRunning ? <Pause className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
+                  {isTimerRunning && <span>{fmtSeconds(subtaskTimerSeconds)}</span>}
                 </button>
+
+                {/* Assignee select */}
+                <div className="flex items-center gap-1">
+                  {s.assigneeId && (
+                    <Avatar
+                      name={people.find((p) => p.id === s.assigneeId)?.name || "User"}
+                      size={18}
+                    />
+                  )}
+                  <select
+                    value={s.assigneeId ?? ""}
+                    onChange={(e) => patch(s.id, { assigneeId: e.target.value || null })}
+                    className="max-w-[95px] truncate bg-transparent text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 outline-none cursor-pointer"
+                    title="Subtask Assignee"
+                  >
+                    <option value="">Unassigned</option>
+                    {active.map((p) => (
+                      <option key={p.id} value={p.id}>
+                        {p.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Due date input */}
+                <input
+                  type="date"
+                  value={toInputDate(s.dueDate)}
+                  onChange={(e) => patch(s.id, { dueDate: e.target.value || null })}
+                  className="w-[105px] bg-transparent text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 outline-none cursor-pointer"
+                  title="Subtask Due Date"
+                />
+
+                {/* Maximize to full subtask sheet */}
                 <button
                   type="button"
-                  onClick={() => handleQuickLogSubtask(s.id, 30)}
-                  className="hidden sm:inline-flex rounded px-1 py-0.5 text-[10px] font-mono text-muted hover:text-ink hover:bg-canvas cursor-pointer"
-                  title="Quick add +30 mins to subtask"
+                  onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
+                  className="p-1 rounded text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40 transition cursor-pointer"
+                  title="Open dedicated subtask sheet (Timer, Goal, Brief)"
                 >
-                  +30m
+                  <ExternalLink className="h-3.5 w-3.5" />
+                </button>
+
+                {/* Delete */}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setItems((xs) => xs.filter((x) => x.id !== s.id));
+                    deleteSubtask(s.id).catch(() => {
+                      setItems((xs) => [...xs, s]);
+                      onError("Couldn't delete subtask");
+                    });
+                  }}
+                  className="p-1 text-slate-300 hover:text-rose-600 transition opacity-0 group-hover:opacity-100 cursor-pointer"
+                  title="Delete subtask"
+                >
+                  <X className="h-3.5 w-3.5" />
                 </button>
               </div>
-
-              {/* Assignee select */}
-              <select
-                value={s.assigneeId ?? ""}
-                onChange={(e) => patch(s.id, { assigneeId: e.target.value || null })}
-                className="w-24 shrink-0 truncate bg-transparent text-[11.5px] text-muted outline-none hover:text-ink"
-                title="Assignee"
-              >
-                <option value="">Unassigned</option>
-                {active.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.name}
-                  </option>
-                ))}
-              </select>
-
-              {/* Due date input */}
-              <input
-                type="date"
-                value={toInputDate(s.dueDate)}
-                onChange={(e) => patch(s.id, { dueDate: e.target.value || null })}
-                className="w-[110px] shrink-0 bg-transparent text-[11px] text-muted outline-none hover:text-ink"
-                title="Due date"
-              />
-
-              <button
-                type="button"
-                onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
-                className="shrink-0 p-1 rounded text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40 transition cursor-pointer"
-                title="Open full dedicated subtask sheet"
-              >
-                <Maximize2 className="h-3.5 w-3.5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  setItems((xs) => xs.filter((x) => x.id !== s.id));
-                  deleteSubtask(s.id).catch(() => {
-                    setItems((xs) => [...xs, s]);
-                    onError("Couldn't delete subtask");
-                  });
-                }}
-                className="shrink-0 text-muted opacity-0 hover:text-rose-600 group-hover:opacity-100 cursor-pointer"
-                title="Delete subtask"
-              >
-                <X className="h-3.5 w-3.5" />
-              </button>
             </div>
           );
         })}
 
         {canEdit && (
-          <form onSubmit={add} className="flex items-center gap-2 px-2.5 py-1.5 bg-canvas/30">
-            <Plus className="h-4 w-4 shrink-0 text-muted" />
+          <form onSubmit={add} className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 dark:bg-white/[0.02]">
+            <Plus className="h-4 w-4 shrink-0 text-slate-400" />
             <input
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="Quick add subtask… (or click 'Custom Subtask' for full fields)"
-              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-muted/70"
+              placeholder="Add a child issue / subtask... (press Enter to save)"
+              className="min-w-0 flex-1 bg-transparent text-[13px] outline-none placeholder:text-slate-400"
             />
-            <select
-              value={assignee}
-              onChange={(e) => setAssignee(e.target.value)}
-              className="w-28 shrink-0 bg-transparent text-[12px] text-muted outline-none"
-            >
-              <option value="">Assignee</option>
-              {active.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <input
-              type="date"
-              value={due}
-              onChange={(e) => setDue(e.target.value)}
-              className="w-[114px] shrink-0 bg-transparent text-[12px] text-muted outline-none"
-            />
+            {title.trim() && (
+              <button
+                type="submit"
+                className="shrink-0 rounded bg-[#0052CC] px-2.5 py-0.5 text-[11px] font-semibold text-white cursor-pointer hover:bg-blue-700 transition"
+              >
+                Add
+              </button>
+            )}
           </form>
         )}
       </div>
@@ -1584,8 +1582,8 @@ export function StoragePicker({
   }
 
   return (
-    <div className="space-y-1.5">
-      <div className="flex items-center gap-1.5">
+    <div className="space-y-1">
+      <div className="flex items-center gap-1.5 min-w-0">
         <select
           value={value ?? ""}
           disabled={disabled}
@@ -1593,18 +1591,18 @@ export function StoragePicker({
             if (e.target.value === "__new") setAdding(true);
             else onChange(e.target.value || null);
           }}
-          className="cell-select truncate flex-1"
+          className="cell-select truncate flex-1 min-w-0"
         >
-          <option value="">— Select Hard Drive —</option>
+          <option value="">— Select Drive —</option>
           {storages.map((s) => {
             const count = driveSummaryMap.get(s.name)?.length ?? 0;
             return (
               <option key={s.id} value={s.id}>
-                {s.name} {count > 0 ? `(${count} folders)` : ""}
+                {s.name} {count > 0 ? `(${count})` : ""}
               </option>
             );
           })}
-          <option value="__new">+ Add new universal drive…</option>
+          <option value="__new">+ Add drive…</option>
         </select>
 
         <button
@@ -1613,31 +1611,25 @@ export function StoragePicker({
             setSelectedDriveFilter(selectedStorage?.name || "ALL");
             setExplorerOpen(true);
           }}
-          className="shrink-0 inline-flex items-center gap-1 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 transition cursor-pointer"
-          title="Universal Hard Drive Directory: inspect drive folders, add new drives, or register data"
+          className="shrink-0 h-6 w-6 rounded flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition cursor-pointer"
+          title="Open Master Hard Drive Directory & contents"
         >
-          <HardDrive className="h-3 w-3" />
-          <span>Browse Drives</span>
+          <HardDrive className="size-3.5" />
         </button>
       </div>
 
-      {selectedStorage && currentDriveAssets.length > 0 && (
-        <div className="rounded border border-line/80 bg-canvas/50 px-2 py-1 text-[11px] text-muted flex items-center justify-between">
-          <span className="truncate">
-            <strong className="text-ink">{selectedStorage.name}</strong> holds{" "}
-            <strong className="text-ink">{currentDriveAssets.length}</strong> indexed folders/assets
-          </span>
-          <button
-            type="button"
-            onClick={() => {
-              setSelectedDriveFilter(selectedStorage.name);
-              setExplorerOpen(true);
-            }}
-            className="text-[#0052CC] font-semibold hover:underline ml-2 shrink-0 cursor-pointer"
-          >
-            View contents
-          </button>
-        </div>
+      {selectedStorage && (
+        <button
+          type="button"
+          onClick={() => {
+            setSelectedDriveFilter(selectedStorage.name);
+            setExplorerOpen(true);
+          }}
+          className="text-[10.5px] font-medium text-[#0052CC] hover:underline flex items-center gap-1 cursor-pointer pl-1"
+        >
+          <span>📁 {currentDriveAssets.length} indexed item{currentDriveAssets.length === 1 ? "" : "s"}</span>
+          <span className="text-slate-400">· view directory</span>
+        </button>
       )}
 
       {/* Universal Hard Drive Directory & Folder/Data Explorer Modal (Feedback 3) */}

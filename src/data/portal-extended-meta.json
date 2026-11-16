@@ -1,0 +1,16 @@
+{
+  "projectCosts": {},
+  "subtaskExtras": {
+    "cmwiwpwcs0009icr27dc86kxc": {
+      "description": "gksadksjhdj",
+      "reporter": "Karim",
+      "campaign": "General"
+    }
+  },
+  "userMonthlyCosts": {},
+  "globalOverhead": {
+    "monthlySharedCosts": 200000,
+    "totalTeamHours": 2000,
+    "rate": 100
+  }
+}

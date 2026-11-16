@@ -42,8 +42,8 @@ type Props = {
 
 function Row({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[110px_1fr] items-center gap-2 py-0.5 md:grid-cols-[130px_1fr]">
-      <div className="text-[12px] text-muted">{label}</div>
+    <div className="grid grid-cols-[100px_1fr] items-center gap-2 py-1">
+      <div className="text-[12px] font-medium text-slate-500 dark:text-slate-400">{label}</div>
       <div className="min-w-0">{children}</div>
     </div>
   );
@@ -276,6 +276,7 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
   const [newProposedDate, setNewProposedDate] = useState("");
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
+  const [completenessDismissed, setCompletenessDismissed] = useState(false);
 
   // Daily Standup Form State
   const [standupProgress, setStandupProgress] = useState("");
@@ -703,155 +704,140 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
               </button>
             )}
 
-            {/* POINT 7 & POINT 6: TOP-OF-PANEL LIVE TIME TRACKER + STANDARD SESSION LIMIT WATCHDOG */}
-            <div className="mb-5 rounded-xl border border-blue-200/80 dark:border-blue-900/60 bg-gradient-to-r from-blue-50/70 via-surface to-emerald-50/40 dark:from-blue-950/30 dark:via-[#161B22] dark:to-emerald-950/20 p-3.5 shadow-xs space-y-2.5">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div className="flex items-center gap-2.5">
-                  <div className={cn(
-                    "flex h-8 w-8 items-center justify-center rounded-lg font-bold",
-                    sessionActive ? "bg-emerald-600 text-white animate-pulse" : "bg-[#0052CC]/10 text-[#0052CC]"
-                  )}>
-                    <Clock className="h-4 w-4" />
-                  </div>
-                  <div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-[12px] font-bold uppercase tracking-wider text-ink">
-                        Live Time Tracker
-                      </span>
-                      <span className="rounded-full bg-[#0052CC]/10 px-2 py-0.5 font-mono text-[11px] font-bold text-[#0052CC] dark:text-blue-300">
-                        {Math.round(((t.totalDurationMinutes || 0) / 60) * 10) / 10}h total logged
-                      </span>
-                      <span className="text-[10.5px] text-muted hidden sm:inline">
-                        · Standard Session Limit: {Math.round(sessionLimitSeconds / 3600)}h max block
-                      </span>
-                    </div>
-                    <p className="text-[11px] text-muted">
-                      {sessionActive
-                        ? `Session running (${formatSessionTime(sessionSeconds)} / ${formatSessionTime(sessionLimitSeconds)} limit) — auto-stops if left unattended overnight`
-                        : "Placed at top of task panel — start live timer or log work duration in 1 click"}
-                    </p>
-                  </div>
+            {/* Sleek Live Time Tracker Toolbar */}
+            <div className="mb-4 rounded-lg border border-line bg-surface/80 backdrop-blur-xs px-3.5 py-2 flex flex-wrap items-center justify-between gap-2.5 shadow-2xs">
+              <div className="flex items-center gap-2.5">
+                <div className={cn(
+                  "flex h-7 w-7 items-center justify-center rounded-md font-bold transition",
+                  sessionActive ? "bg-emerald-600 text-white animate-pulse" : "bg-blue-50 dark:bg-blue-950/50 text-[#0052CC] dark:text-blue-400"
+                )}>
+                  <Clock className="h-3.5 w-3.5" />
                 </div>
-
-                <div className="flex flex-wrap items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={toggleSession}
-                    className={cn(
-                      "h-8 px-3.5 rounded-lg font-bold text-[12px] inline-flex items-center gap-1.5 transition cursor-pointer shadow-xs",
-                      sessionActive
-                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                        : "bg-[#0052CC] hover:bg-[#0047B3] text-white"
-                    )}
-                  >
-                    {sessionActive ? (
-                      <>
-                        <Pause className="h-3.5 w-3.5" />
-                        <span>Stop & Log ({formatSessionTime(sessionSeconds)})</span>
-                      </>
-                    ) : (
-                      <>
-                        <Play className="h-3.5 w-3.5 fill-current" />
-                        <span>Start Timer</span>
-                      </>
-                    )}
-                  </button>
-
-                  {[
-                    [30, "+30m"],
-                    [60, "+1h"],
-                    [120, "+2h"],
-                    [240, "+4h"],
-                  ].map(([mins, lbl]) => (
-                    <button
-                      key={lbl}
-                      type="button"
-                      onClick={() => quickLogMinutes(mins as number)}
-                      className="h-8 px-2.5 rounded-lg border border-line bg-surface hover:bg-slate-100 dark:hover:bg-white/10 text-[11.5px] font-semibold text-ink transition cursor-pointer"
-                      title={`Quick log ${lbl}`}
-                    >
-                      {lbl}
-                    </button>
-                  ))}
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-[12px] font-semibold text-ink">
+                    {sessionActive ? "Timer Active:" : "Time Logged:"}
+                  </span>
+                  <span className={cn(
+                    "rounded px-2 py-0.5 font-mono text-[11px] font-bold",
+                    sessionActive ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-950/80 dark:text-emerald-300" : "bg-slate-100 dark:bg-white/10 text-slate-700 dark:text-slate-300"
+                  )}>
+                    {sessionActive ? formatSessionTime(sessionSeconds) : `${Math.round(((t.totalDurationMinutes || 0) / 60) * 10) / 10}h total`}
+                  </span>
+                  <span className="text-[11px] text-muted hidden sm:inline">
+                    · {Math.round(sessionLimitSeconds / 3600)}h max block
+                  </span>
                 </div>
               </div>
 
-              {/* Point 6: Standard Session Limit Reached Notification Banner */}
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={toggleSession}
+                  className={cn(
+                    "h-7 px-3 rounded-md font-semibold text-[11.5px] inline-flex items-center gap-1.5 transition cursor-pointer shadow-2xs",
+                    sessionActive
+                      ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                      : "bg-[#0052CC] hover:bg-[#0047B3] text-white"
+                  )}
+                >
+                  {sessionActive ? (
+                    <>
+                      <Pause className="h-3 w-3" />
+                      <span>Stop & Log</span>
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3 w-3 fill-current" />
+                      <span>Start Timer</span>
+                    </>
+                  )}
+                </button>
+
+                {[
+                  [30, "+30m"],
+                  [60, "+1h"],
+                  [120, "+2h"],
+                ].map(([mins, lbl]) => (
+                  <button
+                    key={lbl}
+                    type="button"
+                    onClick={() => quickLogMinutes(mins as number)}
+                    className="h-7 px-2 rounded-md border border-line bg-surface hover:bg-slate-100 dark:hover:bg-white/10 text-[11px] font-semibold text-slate-700 dark:text-slate-300 transition cursor-pointer"
+                    title={`Quick log ${lbl}`}
+                  >
+                    {lbl}
+                  </button>
+                ))}
+              </div>
+
+              {/* Standard Session Limit Reached Notification Banner */}
               {(sessionLimitPromptOpen || (sessionActive && sessionSeconds >= sessionLimitSeconds)) && (
-                <div className="rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/60 p-3 flex flex-wrap items-center justify-between gap-3 animate-pulse">
+                <div className="w-full mt-2 rounded-lg border border-amber-400 bg-amber-50 dark:bg-amber-950/60 p-2.5 flex flex-wrap items-center justify-between gap-2 animate-pulse">
                   <div className="flex items-center gap-2 text-amber-950 dark:text-amber-200">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                    <div className="text-[12px]">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                    <div className="text-[11.5px]">
                       <strong>Standard Session Limit ({Math.round(sessionLimitSeconds / 3600)}h) Reached:</strong>{" "}
-                      Please end your session now or extend it. If unanswered, the timer stops automatically so it won&apos;t run overnight.
+                      Please end session or extend.
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5">
                     {sessionLimitSeconds < MAX_SESSION_LIMIT_SECONDS && (
-                      <>
-                        <button
-                          type="button"
-                          onClick={() => handleExtendSession(1)}
-                          className="h-7 px-2.5 rounded bg-amber-600 hover:bg-amber-700 text-white text-[11px] font-bold cursor-pointer"
-                        >
-                          Extend +1h
-                        </button>
-                        <button
-                          type="button"
-                          onClick={() => handleExtendSession(2)}
-                          className="h-7 px-2.5 rounded bg-amber-700 hover:bg-amber-800 text-white text-[11px] font-bold cursor-pointer"
-                        >
-                          Extend +2h
-                        </button>
-                      </>
+                      <button
+                        type="button"
+                        onClick={() => handleExtendSession(1)}
+                        className="h-6 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-bold cursor-pointer"
+                      >
+                        Extend +1h
+                      </button>
                     )}
                     <button
                       type="button"
                       onClick={toggleSession}
-                      className="h-7 px-3 rounded bg-rose-600 hover:bg-rose-700 text-white text-[11px] font-bold cursor-pointer"
+                      className="h-6 px-2.5 rounded bg-rose-600 hover:bg-rose-700 text-white text-[10.5px] font-bold cursor-pointer"
                     >
-                      End Session Now
+                      End Now
                     </button>
                   </div>
                 </div>
               )}
             </div>
 
-            {/* POINT 9: INACTIVE & INCOMPLETE TASK ALERTS — HIGHLIGHT MISSING FIELDS INSIDE TASK */}
+            {/* Task Completeness & Inactivity Check (Subtle, non-intrusive banner) */}
             {(() => {
+              if (completenessDismissed) return null;
               const gaps: string[] = [];
               if (!t.assigneeId) gaps.push("Assignee");
-              if (!t.internalDeadline) gaps.push("Internal Due Date");
-              if (!t.campaignId) gaps.push("Campaign / Epic");
-              if (!t.storageId) gaps.push("Hard Drive / Storage");
-              if (!t.context?.trim()) gaps.push("Description / Brief");
+              if (!t.internalDeadline) gaps.push("Internal Due");
+              if (!t.campaignId) gaps.push("Campaign");
+              if (!t.storageId) gaps.push("Hard Drive");
+              if (!t.context?.trim()) gaps.push("Brief");
               if (!t.workType) gaps.push("Work Type");
               const daysInactive = Math.floor((Date.now() - new Date(t.updatedAt).getTime()) / (1000 * 60 * 60 * 24));
               if (gaps.length === 0 && daysInactive < 2) return null;
               return (
-                <div className="mb-5 rounded-lg border border-amber-300 dark:border-amber-800/80 bg-amber-50/80 dark:bg-amber-950/30 px-3.5 py-2.5 flex flex-wrap items-center justify-between gap-2 text-[12px] text-amber-950 dark:text-amber-200">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <AlertTriangle className="h-4 w-4 text-amber-600 shrink-0" />
-                    <span className="font-bold">Task Completeness & Activity Check:</span>
+                <div className="mb-4 rounded-md border border-amber-200 dark:border-amber-900/60 bg-amber-50/70 dark:bg-amber-950/20 px-3 py-1.5 flex items-center justify-between gap-2 text-[11.5px] text-amber-900 dark:text-amber-200">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <AlertTriangle className="h-3.5 w-3.5 text-amber-600 shrink-0" />
+                    <span className="font-semibold">Missing info:</span>
                     {gaps.length > 0 && (
-                      <span>
-                        Missing required fields highlighted below:{" "}
-                        {gaps.map((g) => (
-                          <span
-                            key={g}
-                            className="inline-block rounded bg-amber-200/80 dark:bg-amber-900/70 px-1.5 py-0.5 text-[10.5px] font-bold text-amber-950 dark:text-amber-100 mr-1"
-                          >
-                            {g}
-                          </span>
-                        ))}
+                      <span className="text-amber-800 dark:text-amber-300">
+                        {gaps.join(", ")}
                       </span>
                     )}
                     {daysInactive >= 2 && !done && (
-                      <span className="rounded bg-rose-100 dark:bg-rose-950/70 px-2 py-0.5 text-[10.5px] font-bold text-rose-700 dark:text-rose-300">
-                        No movement for {daysInactive} days
+                      <span className="text-rose-600 dark:text-rose-400 font-medium">
+                        · No activity for {daysInactive} days
                       </span>
                     )}
                   </div>
+                  <button
+                    type="button"
+                    onClick={() => setCompletenessDismissed(true)}
+                    className="p-0.5 text-amber-700/60 hover:text-amber-900 dark:hover:text-amber-100 cursor-pointer"
+                    title="Dismiss alert"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
                 </div>
               );
             })()}
@@ -965,15 +951,10 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                   )}
                 </div>
 
-                {/* Description (highlighted if missing per Point 9) */}
+                {/* Description */}
                 <div className="space-y-1.5">
                   <div className="flex items-center justify-between">
                     <h3 className="text-[12px] font-bold uppercase tracking-wider text-muted">Description</h3>
-                    {!t.context?.trim() && (
-                      <span className="rounded bg-amber-100 dark:bg-amber-950/60 px-1.5 py-0.5 text-[10px] font-bold text-amber-800 dark:text-amber-300">
-                        ⚠️ Missing Brief / Details
-                      </span>
-                    )}
                   </div>
                   {can("context") ? (
                     <textarea
@@ -982,15 +963,10 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                       onBlur={() => context !== (t.context ?? "") && onUpdate(t.id, { context })}
                       rows={4}
                       placeholder="Add a description, brief, or delivery specifications..."
-                      className={cn(
-                        "w-full resize-y rounded-[3px] border bg-surface p-2.5 text-[13px] leading-relaxed outline-none focus:border-[#0052CC]",
-                        !t.context?.trim()
-                          ? "border-amber-400 bg-amber-50/20 dark:border-amber-700"
-                          : "border-line"
-                      )}
+                      className="w-full resize-y rounded-md border border-line bg-surface p-2.5 text-[13px] leading-relaxed outline-none focus:border-[#0052CC]"
                     />
                   ) : (
-                    <div className="rounded-[3px] border border-line/60 p-2.5 text-[13px] bg-canvas/40">
+                    <div className="rounded-md border border-line/60 p-2.5 text-[13px] bg-canvas/40">
                       {t.context ? <RichText text={t.context} /> : <span className="text-muted">No description provided.</span>}
                     </div>
                   )}
@@ -1051,29 +1027,26 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                   </Row>
 
                   <Row label="Assignee">
-                    <div className={cn(
-                      "flex items-center gap-1.5 rounded px-1 py-0.5",
-                      !t.assigneeId && "border border-amber-400 bg-amber-50/40 dark:bg-amber-950/30"
-                    )}>
-                      {t.assigneeName ? <Avatar name={t.assigneeName} size={22} /> : <span className="h-5 w-5 rounded-full border border-dashed border-amber-500 text-amber-600 text-[10px] font-bold flex items-center justify-center">!</span>}
+                    <div className="flex items-center gap-1.5 rounded px-1 py-0.5">
+                      {t.assigneeName ? <Avatar name={t.assigneeName} size={22} /> : <span className="h-5 w-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 text-slate-400 text-[10px] font-bold flex items-center justify-center">?</span>}
                       <CellSelect
                         value={t.assigneeId ?? ""}
                         disabled={!can("assigneeId")}
-                        options={[{ value: "", label: "⚠️ Unassigned (Assign owner)" }, ...people.filter((p) => p.active || p.id === t.assigneeId).map((p) => ({ value: p.id, label: p.name }))]}
+                        options={[{ value: "", label: "Unassigned" }, ...people.filter((p) => p.active || p.id === t.assigneeId).map((p) => ({ value: p.id, label: p.name }))]}
                         onChange={(v) => onUpdate(t.id, { assigneeId: v || null })}
                       />
                     </div>
                   </Row>
 
                   <Row label="Reporter">
-                    <div className="flex items-center gap-1.5 text-[12px] font-medium text-ink">
+                    <div className="flex items-center gap-1.5 text-[12px] font-medium text-ink px-1">
                       <Avatar name={t.createdByName || "Admin"} size={22} />
                       <span>{t.createdByName || "Admin"}</span>
                     </div>
                   </Row>
 
                   <Row label="Brand">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 px-1">
                       <span className="h-2.5 w-2.5 rounded-[2px] shrink-0" style={{ background: brand?.color || "#0052CC" }} />
                       <CellSelect
                         value={t.brandId ?? ""}
@@ -1085,16 +1058,13 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                   </Row>
 
                   <Row label="Campaign / Epic">
-                    <div className={cn(
-                      "flex items-center gap-1.5 min-w-0 rounded px-1 py-0.5",
-                      !t.campaignId && "border border-amber-400 bg-amber-50/40 dark:bg-amber-950/30"
-                    )}>
+                    <div className="flex items-center gap-1.5 min-w-0 rounded px-1 py-0.5">
                       <div className="min-w-0 flex-1">
                         <CellSelect
                           value={t.campaignId ?? ""}
                           disabled={!can("campaignId")}
                           options={[
-                            { value: "", label: "⚠️ Select campaign..." },
+                            { value: "", label: "Select campaign..." },
                             ...(brand?.campaigns ?? []).map((c) => ({ value: c.id, label: c.name })),
                           ]}
                           onChange={(v) => {
@@ -1119,7 +1089,7 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                     </div>
                   </Row>
 
-                  {/* Point 1 Feedback: Goal Setup & Linking on Task */}
+                  {/* Goal Setup & Linking on Task */}
                   <Row label="Goal">
                     <div className="flex items-center gap-1.5 min-w-0 rounded px-1 py-0.5">
                       <div className="min-w-0 flex-1">
@@ -1127,7 +1097,7 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                           value={t.goalId ?? ""}
                           disabled={!can("goalId")}
                           options={[
-                            { value: "", label: "No goal set (Select or create goal)" },
+                            { value: "", label: "No goal set" },
                             ...allGoals.map((g) => ({ value: g.id, label: `🎯 ${g.title} (${g.progress}%)` })),
                           ]}
                           onChange={(v) => {
@@ -1148,12 +1118,9 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                     </div>
                   </Row>
 
-                  {/* Point 1: Hard Drive / Storage Management Picker */}
+                  {/* Hard Drive / Storage Management Picker */}
                   <Row label="Hard Drive">
-                    <div className={cn(
-                      "rounded p-0.5",
-                      !t.storageId && "border border-amber-400 bg-amber-50/40 dark:bg-amber-950/30"
-                    )}>
+                    <div className="rounded p-0.5 min-w-0">
                       <StoragePicker
                         value={t.storageId}
                         storages={storages}
@@ -1166,51 +1133,51 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                   </Row>
 
                   <Row label="Priority">
-                    <div className="flex items-center gap-1.5">
+                    <div className="flex items-center gap-1.5 px-1">
                       <JiraPriorityIcon priority={t.priority} />
                       <CellSelect value={t.priority} disabled={!can("priority")} options={opts(PRIORITIES)} onChange={set("priority")} />
                     </div>
                   </Row>
 
                   <Row label="Work Type">
-                    <div className={cn(
-                      "rounded px-1 py-0.5",
-                      !t.workType && "border border-amber-400 bg-amber-50/40 dark:bg-amber-950/30"
-                    )}>
+                    <div className="rounded px-1 py-0.5">
                       <CellSelect
                         value={t.workType ?? ""}
                         disabled={!can("workType")}
-                        options={[{ value: "", label: "⚠️ Select work type..." }, ...opts(WORK_TYPES)]}
+                        options={[{ value: "", label: "Select work type..." }, ...opts(WORK_TYPES)]}
                         onChange={set("workType")}
                       />
                     </div>
                   </Row>
 
                   <Row label="Issue Type">
-                    <CellSelect value={t.type ?? ""} disabled={!can("type")} options={opts(TYPES)} onChange={set("type")} />
+                    <div className="px-1">
+                      <CellSelect value={t.type ?? ""} disabled={!can("type")} options={opts(TYPES)} onChange={set("type")} />
+                    </div>
                   </Row>
 
                   <Row label="Internal Due">
-                    <input
-                      type="date"
-                      disabled={!can("internalDeadline")}
-                      value={toInputDate(t.internalDeadline)}
-                      onChange={(e) => onUpdate(t.id, { internalDeadline: e.target.value || null })}
-                      className={cn(
-                        "cell-select font-medium",
-                        !t.internalDeadline && "border border-amber-400 bg-amber-50/40 dark:bg-amber-950/30"
-                      )}
-                    />
+                    <div className="px-1">
+                      <input
+                        type="date"
+                        disabled={!can("internalDeadline")}
+                        value={toInputDate(t.internalDeadline)}
+                        onChange={(e) => onUpdate(t.id, { internalDeadline: e.target.value || null })}
+                        className="cell-select font-medium"
+                      />
+                    </div>
                   </Row>
 
                   <Row label="Client Due">
-                    <input
-                      type="date"
-                      disabled={!can("externalDeadline")}
-                      value={toInputDate(t.externalDeadline)}
-                      onChange={(e) => onUpdate(t.id, { externalDeadline: e.target.value || null })}
-                      className="cell-select font-medium"
-                    />
+                    <div className="px-1">
+                      <input
+                        type="date"
+                        disabled={!can("externalDeadline")}
+                        value={toInputDate(t.externalDeadline)}
+                        onChange={(e) => onUpdate(t.id, { externalDeadline: e.target.value || null })}
+                        className="cell-select font-medium"
+                      />
+                    </div>
                   </Row>
 
                   {(t.brandRepositoryUrl || t.campaignRepositoryUrl) && (
