@@ -41,6 +41,7 @@ export const MEMBER_FIELDS = new Set([
   "startAt",
   "endAt",
   "storageId",
+  "goalId",
   "briefStage",
   "scriptStage",
   "preProStage",

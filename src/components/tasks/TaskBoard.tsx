@@ -15,6 +15,7 @@ export default function TaskBoard({
   tasks,
   selectedId,
   showAssignee,
+  viewerId,
   onOpen,
   onMove,
   onQuickAdd,
@@ -22,6 +23,7 @@ export default function TaskBoard({
   tasks: TaskDTO[];
   selectedId: string | null;
   showAssignee: boolean;
+  viewerId?: string;
   onOpen: (id: string) => void;
   onMove: (task: TaskDTO, to: BoardKey) => void;
   onQuickAdd?: (col: string, title: string) => Promise<void>;
@@ -115,6 +117,17 @@ export default function TaskBoard({
                   <div className="text-[13px] font-medium leading-snug text-ink group-hover:text-[#0052CC] transition-colors">
                     {t.title}
                   </div>
+
+                  {/* Dedicated Subtask Pill for Viewer */}
+                  {t.subtasks && viewerId && t.subtasks.filter((s) => s.assigneeId === viewerId).map((s) => (
+                    <div
+                      key={s.id}
+                      className="mt-1.5 flex items-center justify-between gap-1 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 px-2 py-1 text-[11px] font-semibold text-[#0052CC] dark:text-blue-300"
+                    >
+                      <span className="truncate">🎯 Subtask: {s.title}</span>
+                      <span className="shrink-0 text-[10px] font-mono opacity-80 font-bold">({s.status})</span>
+                    </div>
+                  ))}
 
                   {/* Delay / Late Warning */}
                   <div className="mt-1.5 flex flex-wrap items-center gap-1.5">

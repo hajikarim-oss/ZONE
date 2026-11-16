@@ -65,6 +65,14 @@ export default function TaskCards({
                       <div className="min-w-0 flex-1">
                         <div className={cn("text-[14px] leading-snug", done && "text-muted line-through decoration-muted/40")}>{t.title}</div>
                         <div className="mt-0.5 text-[11px] text-muted">{t.code}</div>
+                        {t.subtasks && t.subtasks.filter((s) => s.assigneeId === viewer.id).map((s) => (
+                          <div
+                            key={s.id}
+                            className="mt-1 inline-flex items-center gap-1 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.5 text-[10.5px] font-semibold text-[#0052CC] dark:text-blue-300"
+                          >
+                            🎯 Subtask: {s.title} ({s.status})
+                          </div>
+                        ))}
                       </div>
                       {showAssignee && t.assigneeName && <Avatar name={t.assigneeName} size={24} />}
                       {t.assigneeId !== viewer.id && t.collaboratorIds.includes(viewer.id) && (

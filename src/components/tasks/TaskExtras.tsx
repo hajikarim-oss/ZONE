@@ -3,17 +3,23 @@
 import {
   Check,
   ChevronDown,
+  Clock,
   Database,
   ExternalLink,
   FileText,
   FolderOpen,
+  FolderPlus,
   HardDrive,
   Link2,
   Maximize2,
   Paperclip,
+  Pause,
+  Play,
   Plus,
   Search,
   Sparkles,
+  Target,
+  Trash2,
   UploadCloud,
   User,
   X,
@@ -23,15 +29,20 @@ import Avatar from "@/components/Avatar";
 import {
   addAttachments,
   addSubtask,
+  createGoal,
   createStorage,
+  createUniversalDrive,
+  addDriveEntry,
+  deleteDriveEntry,
   deleteAttachment,
   deleteSubtask,
+  logSubtaskTime,
   updateSubtask,
   type AttachmentDTO,
   type SubtaskDTO,
 } from "@/lib/actions";
 import { driveConfigured, pickFromDrive } from "@/lib/drive-picker";
-import type { PersonDTO, StorageDTO } from "@/lib/dto";
+import type { GoalDTO, PersonDTO, StorageDTO, StorageEntryDTO } from "@/lib/dto";
 import { cn, toInputDate } from "@/lib/utils";
 import storageDataJson from "@/data/storage-management.json";
 
@@ -88,12 +99,14 @@ export type SubtaskExtraFields = {
 
 const sectionTitle = "mb-1.5 mt-6 flex items-center gap-2 text-[12px] font-semibold uppercase tracking-wide text-muted";
 
-// ---------------- Subtasks (Point 4: Templates + Custom Subtasks + Expandable Full Task Sheet) ----------------
+// ---------------- Subtasks (Dedicated Work, Time Tracker & Goal Setup) ----------------
 export function Subtasks({
   projectId,
   items,
   setItems,
   people,
+  goals = [],
+  onGoalCreated,
   canEdit,
   onError,
   defaultReporter,
@@ -104,6 +117,8 @@ export function Subtasks({
   items: SubtaskDTO[] | null;
   setItems: (fn: (x: SubtaskDTO[]) => SubtaskDTO[]) => void;
   people: PersonDTO[];
+  goals?: { id: string; title: string }[];
+  onGoalCreated?: (g: { id: string; title: string }) => void;
   canEdit: boolean;
   onError: (msg: string) => void;
   defaultReporter?: string | null;
@@ -121,6 +136,15 @@ export function Subtasks({
   const [expandedSubtaskId, setExpandedSubtaskId] = useState<string | null>(null);
   const [customModalOpen, setCustomModalOpen] = useState(false);
 
+  // Live Timer on Subtask state
+  const [subtaskTimerActive, setSubtaskTimerActive] = useState<string | null>(null);
+  const [subtaskTimerSeconds, setSubtaskTimerSeconds] = useState(0);
+
+  // New Goal Modal state
+  const [newGoalModalOpen, setNewGoalModalOpen] = useState(false);
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalBusy, setNewGoalBusy] = useState(false);
+
   // Custom subtask form states
   const [customTitle, setCustomTitle] = useState("");
   const [customDesc, setCustomDesc] = useState("");
@@ -128,11 +152,21 @@ export function Subtasks({
   const [customDue, setCustomDue] = useState("");
   const [customReporter, setCustomReporter] = useState(defaultReporter || "Admin");
   const [customCampaign, setCustomCampaign] = useState(defaultCampaign || "");
+  const [customGoalId, setCustomGoalId] = useState("");
+  const [customPriority, setCustomPriority] = useState("Medium");
   const [savingCustom, setSavingCustom] = useState(false);
 
   const list = items ?? [];
   const done = list.filter((s) => s.done).length;
   const active = people.filter((p) => p.active);
+
+  useEffect(() => {
+    if (!subtaskTimerActive) return;
+    const interval = setInterval(() => {
+      setSubtaskTimerSeconds((s) => s + 1);
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [subtaskTimerActive]);
 
   useEffect(() => {
     let cancelled = false;
@@ -182,16 +216,84 @@ export function Subtasks({
       });
   }
 
+  async function handleToggleSubtaskTimer(subtaskId: string) {
+    if (subtaskTimerActive === subtaskId) {
+      // Stop and log
+      const mins = Math.max(1, Math.round(subtaskTimerSeconds / 60));
+      setSubtaskTimerActive(null);
+      setSubtaskTimerSeconds(0);
+      try {
+        await logSubtaskTime({
+          subtaskId,
+          projectId,
+          durationMinutes: mins,
+          notes: "Live subtask stopwatch timer",
+        });
+        const currentMins = list.find((x) => x.id === subtaskId)?.timeSpentMinutes || 0;
+        patch(subtaskId, { timeSpentMinutes: currentMins + mins });
+      } catch (err) {
+        onError(err instanceof Error ? err.message : "Couldn't log subtask time");
+      }
+    } else {
+      setSubtaskTimerActive(subtaskId);
+      setSubtaskTimerSeconds(0);
+    }
+  }
+
+  async function handleQuickLogSubtask(subtaskId: string, mins: number) {
+    try {
+      await logSubtaskTime({
+        subtaskId,
+        projectId,
+        durationMinutes: mins,
+        notes: `Quick subtask log +${mins}m`,
+      });
+      const currentMins = list.find((x) => x.id === subtaskId)?.timeSpentMinutes || 0;
+      patch(subtaskId, { timeSpentMinutes: currentMins + mins });
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Couldn't log subtask time");
+    }
+  }
+
+  async function handleCreateNewGoal(targetSubtaskId?: string) {
+    if (!newGoalTitle.trim()) return;
+    setNewGoalBusy(true);
+    try {
+      const g = await createGoal({
+        title: newGoalTitle.trim(),
+        ownerId: (targetSubtaskId && list.find((x) => x.id === targetSubtaskId)?.assigneeId) || null,
+      });
+      onGoalCreated?.(g);
+      if (targetSubtaskId) {
+        patch(targetSubtaskId, { goalId: g.id, goalTitle: g.title });
+      } else {
+        setCustomGoalId(g.id);
+      }
+      setNewGoalTitle("");
+      setNewGoalModalOpen(false);
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Couldn't create goal");
+    } finally {
+      setNewGoalBusy(false);
+    }
+  }
+
   function add(e: React.FormEvent) {
     e.preventDefault();
     const t = title.trim();
     if (!t) return;
     const tmp: SubtaskDTO = {
       id: `tmp-${Date.now()}`,
+      projectId,
       title: t,
       assigneeId: assignee || null,
       dueDate: due || null,
       done: false,
+      status: "Todo",
+      priority: "Medium",
+      timeSpentMinutes: 0,
+      description: null,
+      goalId: null,
     };
     setItems((xs) => [...xs, tmp]);
     setTitle("");
@@ -221,6 +323,10 @@ export function Subtasks({
         title: t,
         assigneeId: customAssignee || null,
         dueDate: customDue || null,
+        description: customDesc.trim() || undefined,
+        status: "Todo",
+        priority: customPriority,
+        goalId: customGoalId || undefined,
       });
       setItems((xs) => [...xs, saved]);
       await saveExtra(saved.id, {
@@ -232,6 +338,7 @@ export function Subtasks({
       setCustomDesc("");
       setCustomAssignee("");
       setCustomDue("");
+      setCustomGoalId("");
       setCustomModalOpen(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Couldn't create custom subtask");
@@ -247,10 +354,16 @@ export function Subtasks({
       for (const t of tplTasks) {
         const tmp: SubtaskDTO = {
           id: `tmp-${Date.now()}-${Math.random()}`,
+          projectId,
           title: t,
           assigneeId: null,
           dueDate: null,
           done: false,
+          status: "Todo",
+          priority: "Medium",
+          timeSpentMinutes: 0,
+          description: null,
+          goalId: null,
         };
         setItems((xs) => [...xs, tmp]);
         const saved = await addSubtask(projectId, { title: t, assigneeId: null, dueDate: null });
@@ -265,6 +378,19 @@ export function Subtasks({
 
   const expandedSubtask = list.find((s) => s.id === expandedSubtaskId) || null;
   const expandedExtra = expandedSubtask ? extrasMap[expandedSubtask.id] || {} : {};
+
+  function fmtSeconds(sec: number) {
+    const m = Math.floor(sec / 60);
+    const s = sec % 60;
+    return `${m}:${s < 10 ? "0" : ""}${s}`;
+  }
+
+  const SUBTASK_STATUS_COLORS: Record<string, string> = {
+    Todo: "bg-slate-100 text-slate-700 dark:bg-white/10 dark:text-slate-300",
+    "In Progress": "bg-blue-50 text-blue-700 dark:bg-blue-950/50 dark:text-blue-300 border border-blue-200 dark:border-blue-800",
+    "In Review": "bg-amber-50 text-amber-700 dark:bg-amber-950/50 dark:text-amber-300 border border-amber-200 dark:border-amber-800",
+    Done: "bg-emerald-50 text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800",
+  };
 
   return (
     <>
@@ -352,15 +478,17 @@ export function Subtasks({
       <div className="divide-y divide-line/70 rounded-md border border-line bg-surface">
         {list.map((s) => {
           const ex = extrasMap[s.id] || {};
-          const assigneePerson = people.find((p) => p.id === s.assigneeId);
+          const isTimerRunning = subtaskTimerActive === s.id;
+          const statusVal = s.status || (s.done ? "Done" : "Todo");
+
           return (
             <div
               key={s.id}
-              className="group flex items-center gap-2 px-2.5 py-2 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors"
+              className="group flex flex-wrap sm:flex-nowrap items-center gap-2 px-2.5 py-2 hover:bg-slate-50/80 dark:hover:bg-white/5 transition-colors"
             >
               <button
                 type="button"
-                onClick={() => patch(s.id, { done: !s.done })}
+                onClick={() => patch(s.id, { done: !s.done, status: !s.done ? "Done" : "Todo" })}
                 disabled={s.id.startsWith("tmp-")}
                 className={cn(
                   "flex h-4 w-4 shrink-0 items-center justify-center rounded-full border cursor-pointer",
@@ -373,12 +501,12 @@ export function Subtasks({
                 {s.done && <Check className="h-3 w-3" />}
               </button>
 
-              {/* Short form row inside parent task — clicking opens full subtask sheet */}
+              {/* Title & Goal / Description icons */}
               <button
                 type="button"
                 onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
-                className="min-w-0 flex-1 text-left flex items-center gap-2 cursor-pointer group/title"
-                title="Click to expand and open full subtask sheet"
+                className="min-w-0 flex-1 text-left flex items-center gap-1.5 cursor-pointer group/title"
+                title="Click to open full dedicated subtask sheet (Timer, Goal, Brief)"
               >
                 <span
                   className={cn(
@@ -388,32 +516,82 @@ export function Subtasks({
                 >
                   {s.title}
                 </span>
-                {ex.campaign && (
-                  <span className="shrink-0 rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
+
+                {s.goalTitle && (
+                  <span className="shrink-0 rounded bg-blue-50 dark:bg-blue-950/50 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.2 text-[10px] font-semibold text-[#0052CC] dark:text-blue-300">
+                    🎯 {s.goalTitle}
+                  </span>
+                )}
+
+                {ex.campaign && !s.goalTitle && (
+                  <span className="shrink-0 rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 px-1.5 py-0.2 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
                     {ex.campaign}
                   </span>
                 )}
-                {ex.description && (
-                  <span className="shrink-0 text-slate-400" title={ex.description}>
+
+                {(s.description || ex.description) && (
+                  <span className="shrink-0 text-slate-400" title={s.description || ex.description}>
                     <FileText className="h-3 w-3" />
                   </span>
                 )}
               </button>
 
-              {ex.reporter && (
-                <span
-                  className="hidden sm:inline-flex items-center gap-1 text-[10.5px] text-muted shrink-0"
-                  title={`Reporter: ${ex.reporter}`}
-                >
-                  <User className="h-2.5 w-2.5" />
-                  {ex.reporter.split(" ")[0]}
-                </span>
-              )}
+              {/* Status Badge Dropdown */}
+              <select
+                value={statusVal}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  patch(s.id, { status: val, done: val === "Done" });
+                }}
+                className={cn(
+                  "shrink-0 rounded-full px-2 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border border-transparent",
+                  SUBTASK_STATUS_COLORS[statusVal] || "bg-canvas text-muted"
+                )}
+                title="Subtask Status"
+              >
+                <option value="Todo">Todo</option>
+                <option value="In Progress">In Progress</option>
+                <option value="In Review">In Review</option>
+                <option value="Done">Done</option>
+              </select>
 
+              {/* Subtask Tracker Quick Controls */}
+              <div className="shrink-0 flex items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => handleToggleSubtaskTimer(s.id)}
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10.5px] font-mono font-bold transition cursor-pointer",
+                    isTimerRunning
+                      ? "bg-amber-600 text-white animate-pulse"
+                      : "bg-slate-100 dark:bg-white/10 hover:bg-blue-50 text-muted hover:text-[#0052CC]"
+                  )}
+                  title={isTimerRunning ? "Stop subtask timer & log" : "Start live subtask timer"}
+                >
+                  {isTimerRunning ? <Pause className="h-2.5 w-2.5" /> : <Clock className="h-2.5 w-2.5" />}
+                  <span>
+                    {isTimerRunning
+                      ? fmtSeconds(subtaskTimerSeconds)
+                      : (s.timeSpentMinutes || 0) > 0
+                      ? `${((s.timeSpentMinutes || 0) / 60).toFixed(1)}h`
+                      : "Log"}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleQuickLogSubtask(s.id, 30)}
+                  className="hidden sm:inline-flex rounded px-1 py-0.5 text-[10px] font-mono text-muted hover:text-ink hover:bg-canvas cursor-pointer"
+                  title="Quick add +30 mins to subtask"
+                >
+                  +30m
+                </button>
+              </div>
+
+              {/* Assignee select */}
               <select
                 value={s.assigneeId ?? ""}
                 onChange={(e) => patch(s.id, { assigneeId: e.target.value || null })}
-                className="w-28 shrink-0 truncate bg-transparent text-[12px] text-muted outline-none hover:text-ink"
+                className="w-24 shrink-0 truncate bg-transparent text-[11.5px] text-muted outline-none hover:text-ink"
                 title="Assignee"
               >
                 <option value="">Unassigned</option>
@@ -424,11 +602,12 @@ export function Subtasks({
                 ))}
               </select>
 
+              {/* Due date input */}
               <input
                 type="date"
                 value={toInputDate(s.dueDate)}
                 onChange={(e) => patch(s.id, { dueDate: e.target.value || null })}
-                className="w-[114px] shrink-0 bg-transparent text-[11.5px] text-muted outline-none hover:text-ink"
+                className="w-[110px] shrink-0 bg-transparent text-[11px] text-muted outline-none hover:text-ink"
                 title="Due date"
               />
 
@@ -436,7 +615,7 @@ export function Subtasks({
                 type="button"
                 onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
                 className="shrink-0 p-1 rounded text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40 transition cursor-pointer"
-                title="Open full subtask sheet"
+                title="Open full dedicated subtask sheet"
               >
                 <Maximize2 className="h-3.5 w-3.5" />
               </button>
@@ -504,7 +683,7 @@ export function Subtasks({
         </div>
       )}
 
-      {/* Create Custom Subtask Modal (with full fields: title, description, assignee, date, reporter, campaign) */}
+      {/* Create Custom Subtask Modal */}
       {customModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
@@ -516,15 +695,15 @@ export function Subtasks({
           >
             <div className="flex items-center justify-between border-b border-line pb-3">
               <div>
-                <h3 className="text-[15px] font-bold text-ink">Create Custom Subtask</h3>
+                <h3 className="text-[15px] font-bold text-ink">Create Dedicated Subtask</h3>
                 <p className="text-[11.5px] text-muted">
-                  Full subtask specification with title, description, assignee, due date, reporter & campaign
+                  Full subtask specification with live tracker, goal setup, assignee, due date & creative brief
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setCustomModalOpen(false)}
-                className="p-1 rounded-md text-muted hover:text-ink hover:bg-canvas"
+                className="p-1 rounded-md text-muted hover:text-ink hover:bg-canvas cursor-pointer"
               >
                 <X className="h-4 w-4" />
               </button>
@@ -543,6 +722,33 @@ export function Subtasks({
                   className="field-input w-full text-[13px]"
                   autoFocus
                 />
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
+                    <Target className="h-3 w-3 text-[#0052CC]" /> Goal Setup (Analytics Tracking)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewGoalModalOpen(true)}
+                    className="text-[11px] font-semibold text-[#0052CC] hover:underline cursor-pointer"
+                  >
+                    + New Goal
+                  </button>
+                </div>
+                <select
+                  value={customGoalId}
+                  onChange={(e) => setCustomGoalId(e.target.value)}
+                  className="field-input w-full text-[13px]"
+                >
+                  <option value="">— No Goal Linked —</option>
+                  {goals.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.title}
+                    </option>
+                  ))}
+                </select>
               </div>
 
               <div>
@@ -611,20 +817,18 @@ export function Subtasks({
 
                 <div>
                   <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
-                    Campaign
+                    Priority
                   </label>
-                  <input
-                    value={customCampaign}
-                    onChange={(e) => setCustomCampaign(e.target.value)}
-                    list="subtask-campaigns-list"
-                    placeholder="e.g. Diwali Launch / Brand Reel"
+                  <select
+                    value={customPriority}
+                    onChange={(e) => setCustomPriority(e.target.value)}
                     className="field-input w-full text-[13px]"
-                  />
-                  <datalist id="subtask-campaigns-list">
-                    {campaigns.map((c) => (
-                      <option key={c.id} value={c.name} />
-                    ))}
-                  </datalist>
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
                 </div>
               </div>
 
@@ -639,7 +843,7 @@ export function Subtasks({
                 <button
                   type="submit"
                   disabled={savingCustom || !customTitle.trim()}
-                  className="btn-primary text-[12px] px-4"
+                  className="btn-primary text-[12px] px-4 cursor-pointer"
                 >
                   {savingCustom ? "Creating..." : "Create Subtask"}
                 </button>
@@ -649,21 +853,26 @@ export function Subtasks({
         </div>
       )}
 
-      {/* Expandable Full Subtask Sheet Modal (Point 4: Clicking a subtask expands it and opens the full task sheet) */}
+      {/* Expandable Dedicated Subtask Sheet Modal */}
       {expandedSubtask && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           onClick={() => setExpandedSubtaskId(null)}
         >
           <div
-            className="w-full max-w-xl rounded-xl border border-line bg-surface p-6 shadow-2xl space-y-4"
+            className="w-full max-w-xl max-h-[90vh] overflow-y-auto rounded-xl border border-line bg-surface p-6 shadow-2xl space-y-4"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3 border-b border-line pb-3">
               <div className="flex items-center gap-2.5">
                 <button
                   type="button"
-                  onClick={() => patch(expandedSubtask.id, { done: !expandedSubtask.done })}
+                  onClick={() =>
+                    patch(expandedSubtask.id, {
+                      done: !expandedSubtask.done,
+                      status: !expandedSubtask.done ? "Done" : "Todo",
+                    })
+                  }
                   className={cn(
                     "flex h-5 w-5 shrink-0 items-center justify-center rounded-full border cursor-pointer",
                     expandedSubtask.done
@@ -675,7 +884,7 @@ export function Subtasks({
                 </button>
                 <div>
                   <span className="text-[10.5px] font-bold uppercase tracking-wider text-[#0052CC]">
-                    Full Subtask Sheet
+                    Dedicated Subtask Sheet
                   </span>
                   <h3 className="text-[16px] font-bold text-ink">{expandedSubtask.title}</h3>
                 </div>
@@ -687,6 +896,51 @@ export function Subtasks({
               >
                 <X className="h-4 w-4" />
               </button>
+            </div>
+
+            {/* Dedicated Subtask Live Time Tracker */}
+            <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/40 dark:bg-blue-950/20 p-3.5 space-y-2.5">
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 text-[12.5px] font-bold text-ink">
+                  <Clock className="h-4 w-4 text-[#0052CC]" /> Dedicated Subtask Live Time Tracker
+                </span>
+                <span className="font-mono text-[12.5px] font-bold text-[#0052CC]">
+                  {((expandedSubtask.timeSpentMinutes || 0) / 60).toFixed(1)} hrs logged
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => handleToggleSubtaskTimer(expandedSubtask.id)}
+                  className={cn(
+                    "px-3.5 py-1.5 rounded-lg text-[12px] font-bold flex items-center gap-1.5 text-white transition cursor-pointer shadow-2xs",
+                    subtaskTimerActive === expandedSubtask.id
+                      ? "bg-amber-600 hover:bg-amber-700 animate-pulse"
+                      : "bg-[#0052CC] hover:bg-blue-700"
+                  )}
+                >
+                  {subtaskTimerActive === expandedSubtask.id ? (
+                    <>
+                      <Pause className="h-3.5 w-3.5" /> Stop & Log ({fmtSeconds(subtaskTimerSeconds)})
+                    </>
+                  ) : (
+                    <>
+                      <Play className="h-3.5 w-3.5" /> Start Live Stopwatch
+                    </>
+                  )}
+                </button>
+                <span className="text-[11.5px] text-muted">Quick log:</span>
+                {[30, 60, 120, 240].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => handleQuickLogSubtask(expandedSubtask.id, m)}
+                    className="rounded border border-line bg-surface hover:bg-canvas px-2.5 py-1 text-[11.5px] font-mono font-bold text-ink cursor-pointer transition hover:border-[#0052CC]"
+                  >
+                    +{m >= 60 ? `${m / 60}h` : `${m}m`}
+                  </button>
+                ))}
+              </div>
             </div>
 
             <div className="space-y-3.5">
@@ -707,16 +961,88 @@ export function Subtasks({
                 />
               </div>
 
+              {/* Goal setup for subtask (Analytics tracking) */}
+              <div>
+                <div className="flex items-center justify-between mb-1">
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted flex items-center gap-1">
+                    <Target className="h-3 w-3 text-[#0052CC]" /> Goal Setup (Team Analytics Tracking)
+                  </label>
+                  <button
+                    type="button"
+                    onClick={() => setNewGoalModalOpen(true)}
+                    className="text-[11px] font-semibold text-[#0052CC] hover:underline cursor-pointer"
+                  >
+                    + Create New Goal
+                  </button>
+                </div>
+                <select
+                  value={expandedSubtask.goalId || ""}
+                  onChange={(e) => {
+                    const gId = e.target.value || null;
+                    const gObj = goals.find((x) => x.id === gId);
+                    patch(expandedSubtask.id, { goalId: gId, goalTitle: gObj?.title || null });
+                  }}
+                  className="field-input w-full text-[13px]"
+                >
+                  <option value="">— No Goal Linked —</option>
+                  {goals.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.title}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Subtask Status
+                  </label>
+                  <select
+                    value={expandedSubtask.status || (expandedSubtask.done ? "Done" : "Todo")}
+                    onChange={(e) => {
+                      const st = e.target.value;
+                      patch(expandedSubtask.id, { status: st, done: st === "Done" });
+                    }}
+                    className="field-input w-full text-[13px]"
+                  >
+                    <option value="Todo">Todo</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="In Review">In Review</option>
+                    <option value="Done">Done</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Priority
+                  </label>
+                  <select
+                    value={expandedSubtask.priority || "Medium"}
+                    onChange={(e) => patch(expandedSubtask.id, { priority: e.target.value })}
+                    className="field-input w-full text-[13px]"
+                  >
+                    <option value="Low">Low</option>
+                    <option value="Medium">Medium</option>
+                    <option value="High">High</option>
+                    <option value="Urgent">Urgent</option>
+                  </select>
+                </div>
+              </div>
+
               <div>
                 <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
-                  Description
+                  Creative Brief / Deliverable Description
                 </label>
                 <textarea
                   rows={4}
-                  defaultValue={expandedExtra.description || ""}
+                  defaultValue={expandedSubtask.description || expandedExtra.description || ""}
                   key={expandedSubtask.id + "-desc"}
-                  onBlur={(e) => saveExtra(expandedSubtask.id, { description: e.target.value })}
-                  placeholder="Add subtask description, creative notes, or review checklist..."
+                  onBlur={(e) => {
+                    patch(expandedSubtask.id, { description: e.target.value });
+                    saveExtra(expandedSubtask.id, { description: e.target.value });
+                  }}
+                  placeholder="Add subtask instructions, reference timecodes, or review checklist..."
                   className="field-input w-full text-[13px] py-2"
                 />
               </div>
@@ -809,6 +1135,61 @@ export function Subtasks({
                 className="btn-primary text-[12px] px-4 cursor-pointer"
               >
                 Done & Save
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* New Goal Creation Modal */}
+      {newGoalModalOpen && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
+          onClick={() => setNewGoalModalOpen(false)}
+        >
+          <div
+            className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-line pb-2.5">
+              <h3 className="text-[14.5px] font-bold text-ink flex items-center gap-1.5">
+                <Target className="h-4 w-4 text-[#0052CC]" /> Create New Goal for Analytics
+              </h3>
+              <button
+                type="button"
+                onClick={() => setNewGoalModalOpen(false)}
+                className="p-1 rounded-md text-muted hover:text-ink hover:bg-canvas cursor-pointer"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+            <div>
+              <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                Goal Title *
+              </label>
+              <input
+                value={newGoalTitle}
+                onChange={(e) => setNewGoalTitle(e.target.value)}
+                placeholder="e.g. [Deliverables] Complete 10 Reels on Time"
+                className="field-input w-full text-[13px]"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2 pt-2 border-t border-line">
+              <button
+                type="button"
+                onClick={() => setNewGoalModalOpen(false)}
+                className="btn-ghost text-[12px]"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={newGoalBusy || !newGoalTitle.trim()}
+                onClick={() => handleCreateNewGoal(expandedSubtask?.id)}
+                className="btn-primary text-[12px] px-4 cursor-pointer"
+              >
+                {newGoalBusy ? "Creating..." : "Save Goal"}
               </button>
             </div>
           </div>
@@ -946,7 +1327,7 @@ export function Attachments({
   );
 }
 
-// ---------------- Storage name dropdown + Hard Drive Contents Explorer & Sheet Importer (Point 1) ----------------
+// ---------------- Universal Hard Drive Directory & Folder/Asset Explorer (Feedback 3) ----------------
 export function StoragePicker({
   value,
   storages,
@@ -965,34 +1346,79 @@ export function StoragePicker({
   const [adding, setAdding] = useState(false);
   const [name, setName] = useState("");
   const [explorerOpen, setExplorerOpen] = useState(false);
-  const [explorerTab, setExplorerTab] = useState<"browse" | "import">("browse");
+  const [explorerTab, setExplorerTab] = useState<"browse" | "addDrive" | "addEntry" | "import">("browse");
   const [driveSearch, setDriveSearch] = useState("");
   const [selectedDriveFilter, setSelectedDriveFilter] = useState<string>("ALL");
+
+  // Add Universal Drive state
+  const [newDriveName, setNewDriveName] = useState("");
+  const [newDriveType, setNewDriveType] = useState("External SSD");
+  const [newDriveCapacity, setNewDriveCapacity] = useState("4TB");
+  const [newDriveLocation, setNewDriveLocation] = useState("Studio Shelf 1");
+  const [newDriveNotes, setNewDriveNotes] = useState("");
+  const [creatingDrive, setCreatingDrive] = useState(false);
+
+  // Register Folder/Data Entry state
+  const [entryDriveId, setEntryDriveId] = useState("");
+  const [entryTaskName, setEntryTaskName] = useState("");
+  const [entryFolderPath, setEntryFolderPath] = useState("");
+  const [entryStatus, setEntryStatus] = useState("Completed");
+  const [entryReviewer, setEntryReviewer] = useState("");
+  const [entryNotes, setEntryNotes] = useState("");
+  const [addingEntry, setAddingEntry] = useState(false);
+
+  // Dynamic Entries State
+  const [liveEntries, setLiveEntries] = useState<
+    { id: string; storageName: string; task: string; dataLocation: string; progress: string; reviewer: string }[]
+  >(() =>
+    (storageDataJson as any[]).map((item, idx) => ({
+      id: item.id || `storage-item-${idx}`,
+      storageName: item.storageName || "Unassigned",
+      task: item.task || "",
+      dataLocation: item.dataLocation || "—",
+      progress: item.progress || "Completed",
+      reviewer: item.reviewer || "—",
+    }))
+  );
 
   // Sheet import states
   const [sheetUrl, setSheetUrl] = useState("");
   const [csvText, setCsvText] = useState("");
   const [importing, setImporting] = useState(false);
   const [importStatus, setImportStatus] = useState<string | null>(null);
-  const [items] = useState(storageDataJson);
 
   const selectedStorage = storages.find((s) => s.id === value) || null;
 
+  // Load universal drives & storage entries dynamically
+  useEffect(() => {
+    if (!explorerOpen) return;
+    fetch("/api/portal/meta")
+      .then((r) => (r.ok ? r.json() : null))
+      .then(() => {})
+      .catch(() => {});
+  }, [explorerOpen]);
+
   const driveSummaryMap = useMemo(() => {
-    const map = new Map<string, typeof items>();
-    for (const item of items) {
+    const map = new Map<string, typeof liveEntries>();
+    for (const item of liveEntries) {
       const d = item.storageName || "Unassigned";
       const arr = map.get(d) || [];
       arr.push(item);
       map.set(d, arr);
     }
+    // Also include storages that have 0 folders yet
+    for (const s of storages) {
+      if (!map.has(s.name)) {
+        map.set(s.name, []);
+      }
+    }
     return map;
-  }, [items]);
+  }, [liveEntries, storages]);
 
   const currentDriveAssets = selectedStorage ? driveSummaryMap.get(selectedStorage.name) || [] : [];
 
   const filteredItems = useMemo(() => {
-    return items.filter((item) => {
+    return liveEntries.filter((item) => {
       if (selectedDriveFilter !== "ALL" && item.storageName !== selectedDriveFilter) return false;
       if (!driveSearch.trim()) return true;
       const q = driveSearch.toLowerCase();
@@ -1004,7 +1430,7 @@ export function StoragePicker({
         (item.reviewer || "").toLowerCase().includes(q)
       );
     });
-  }, [items, selectedDriveFilter, driveSearch]);
+  }, [liveEntries, selectedDriveFilter, driveSearch]);
 
   async function handlePickDriveByName(driveName: string) {
     const existing = storages.find((s) => s.name.toLowerCase() === driveName.toLowerCase());
@@ -1014,12 +1440,78 @@ export function StoragePicker({
       return;
     }
     try {
-      const created = await createStorage(driveName);
+      const created = await createUniversalDrive({ name: driveName });
       onCreated(created);
       onChange(created.id);
       setExplorerOpen(false);
     } catch (err) {
       onError(err instanceof Error ? err.message : "Couldn't select drive");
+    }
+  }
+
+  async function handleCreateUniversalDriveSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    const n = newDriveName.trim();
+    if (!n) return;
+    setCreatingDrive(true);
+    try {
+      const created = await createUniversalDrive({
+        name: n,
+        type: newDriveType,
+        capacity: newDriveCapacity,
+        location: newDriveLocation,
+        notes: newDriveNotes,
+      });
+      onCreated(created);
+      onChange(created.id);
+      setNewDriveName("");
+      setNewDriveNotes("");
+      setExplorerTab("browse");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to add universal drive");
+    } finally {
+      setCreatingDrive(false);
+    }
+  }
+
+  async function handleAddDriveEntrySubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!entryDriveId || !entryTaskName.trim()) return;
+    setAddingEntry(true);
+    try {
+      const stObj = storages.find((s) => s.id === entryDriveId);
+      const stName = stObj ? stObj.name : "Unassigned";
+
+      await addDriveEntry({
+        storageId: entryDriveId,
+        taskName: entryTaskName.trim(),
+        folderPath: entryFolderPath.trim() || undefined,
+        status: entryStatus,
+        reviewer: entryReviewer.trim() || undefined,
+        notes: entryNotes.trim() || undefined,
+      });
+
+      // Update local explorer list
+      setLiveEntries((prev) => [
+        {
+          id: `entry-${Date.now()}`,
+          storageName: stName,
+          task: entryTaskName.trim(),
+          dataLocation: entryFolderPath.trim() || "—",
+          progress: entryStatus,
+          reviewer: entryReviewer.trim() || "Team",
+        },
+        ...prev,
+      ]);
+
+      setEntryTaskName("");
+      setEntryFolderPath("");
+      setEntryNotes("");
+      setExplorerTab("browse");
+    } catch (err) {
+      onError(err instanceof Error ? err.message : "Failed to register folder data");
+    } finally {
+      setAddingEntry(false);
     }
   }
 
@@ -1064,7 +1556,7 @@ export function StoragePicker({
         onSubmit={async (e) => {
           e.preventDefault();
           try {
-            const s = await createStorage(name);
+            const s = await createUniversalDrive({ name });
             onCreated(s);
             onChange(s.id);
             setName("");
@@ -1108,11 +1600,11 @@ export function StoragePicker({
             const count = driveSummaryMap.get(s.name)?.length ?? 0;
             return (
               <option key={s.id} value={s.id}>
-                {s.name} {count > 0 ? `(${count} projects)` : ""}
+                {s.name} {count > 0 ? `(${count} folders)` : ""}
               </option>
             );
           })}
-          <option value="__new">+ Add new master drive…</option>
+          <option value="__new">+ Add new universal drive…</option>
         </select>
 
         <button
@@ -1122,7 +1614,7 @@ export function StoragePicker({
             setExplorerOpen(true);
           }}
           className="shrink-0 inline-flex items-center gap-1 rounded border border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-950/50 px-2 py-1 text-[11px] font-semibold text-blue-700 dark:text-blue-300 hover:bg-blue-100 transition cursor-pointer"
-          title="View all hard drives, inspect folders/assets on each drive, or sync from Google Sheets"
+          title="Universal Hard Drive Directory: inspect drive folders, add new drives, or register data"
         >
           <HardDrive className="h-3 w-3" />
           <span>Browse Drives</span>
@@ -1148,14 +1640,14 @@ export function StoragePicker({
         </div>
       )}
 
-      {/* Hard Drive Contents Explorer & Legacy Sheet Importer Modal */}
+      {/* Universal Hard Drive Directory & Folder/Data Explorer Modal (Feedback 3) */}
       {explorerOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
           onClick={() => setExplorerOpen(false)}
         >
           <div
-            className="w-full max-w-4xl max-h-[85vh] flex flex-col rounded-xl border border-line bg-surface shadow-2xl overflow-hidden"
+            className="w-full max-w-4xl max-h-[88vh] flex flex-col rounded-xl border border-line bg-surface shadow-2xl overflow-hidden"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-center justify-between border-b border-line px-5 py-3.5 bg-canvas/40">
@@ -1165,10 +1657,10 @@ export function StoragePicker({
                 </div>
                 <div>
                   <h3 className="text-[15px] font-bold text-ink">
-                    Master Hard Drive Directory & Sheet Sync
+                    Universal Hard Drive Directory & Folder Explorer
                   </h3>
                   <p className="text-[11.5px] text-muted">
-                    Single source of truth from Storage Management Sheet — inspect drive folders & pick drive for this project
+                    Universal studio inventory: anyone can add drives, record folder paths, and inspect indexed assets
                   </p>
                 </div>
               </div>
@@ -1183,7 +1675,32 @@ export function StoragePicker({
                       explorerTab === "browse" ? "bg-surface text-ink shadow-2xs" : "text-muted hover:text-ink"
                     )}
                   >
-                    Hard Drives & Contents ({items.length})
+                    Directory ({storages.length} drives)
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setExplorerTab("addDrive")}
+                    className={cn(
+                      "px-3 py-1 rounded-md font-semibold transition flex items-center gap-1 cursor-pointer",
+                      explorerTab === "addDrive" ? "bg-surface text-ink shadow-2xs" : "text-muted hover:text-ink"
+                    )}
+                  >
+                    <FolderPlus className="h-3.5 w-3.5 text-blue-600" />
+                    + Add Drive
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (selectedStorage) setEntryDriveId(selectedStorage.id);
+                      setExplorerTab("addEntry");
+                    }}
+                    className={cn(
+                      "px-3 py-1 rounded-md font-semibold transition flex items-center gap-1 cursor-pointer",
+                      explorerTab === "addEntry" ? "bg-surface text-ink shadow-2xs" : "text-muted hover:text-ink"
+                    )}
+                  >
+                    <FolderOpen className="h-3.5 w-3.5 text-emerald-600" />
+                    + Register Folder
                   </button>
                   <button
                     type="button"
@@ -1194,7 +1711,7 @@ export function StoragePicker({
                     )}
                   >
                     <UploadCloud className="h-3.5 w-3.5" />
-                    Import Google Sheet / CSV
+                    Sync CSV
                   </button>
                 </div>
 
@@ -1208,12 +1725,21 @@ export function StoragePicker({
               </div>
             </div>
 
-            {explorerTab === "browse" ? (
+            {explorerTab === "browse" && (
               <div className="flex-1 overflow-y-auto p-5 space-y-4">
-                {/* Master Hard Drive Cards (1-click select) */}
+                {/* Master Hard Drive Cards */}
                 <div>
-                  <div className="text-[11px] font-bold uppercase tracking-wider text-muted mb-2">
-                    Master Hard Drive List (Click &apos;Use Drive&apos; to assign to this project)
+                  <div className="flex items-center justify-between mb-2">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-muted">
+                      Universal Hard Drives (Click card to filter, or &apos;Use Drive&apos; to assign)
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => setExplorerTab("addDrive")}
+                      className="text-[11.5px] font-semibold text-[#0052CC] hover:underline cursor-pointer flex items-center gap-1"
+                    >
+                      <Plus className="h-3 w-3" /> Add Universal Drive
+                    </button>
                   </div>
                   <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
                     {Array.from(driveSummaryMap.entries()).map(([driveName, driveItems]) => {
@@ -1231,17 +1757,17 @@ export function StoragePicker({
                           )}
                         >
                           <div className="flex items-center justify-between gap-1">
-                            <span className="inline-flex items-center gap-1.5 font-mono text-[12.5px] font-bold text-ink">
-                              <HardDrive className="h-3.5 w-3.5 text-blue-600" />
+                            <span className="inline-flex items-center gap-1.5 font-mono text-[12px] font-bold text-ink truncate">
+                              <HardDrive className="h-3.5 w-3.5 text-blue-600 shrink-0" />
                               {driveName}
                             </span>
-                            <span className="rounded-full bg-slate-200/70 dark:bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-muted">
-                              {driveItems.length} folders
+                            <span className="rounded-full bg-slate-200/70 dark:bg-white/10 px-1.5 py-0.2 text-[10px] font-semibold text-muted shrink-0">
+                              {driveItems.length}
                             </span>
                           </div>
                           <div className="flex items-center justify-between gap-1 pt-1 border-t border-line/60">
-                            <span className="text-[10.5px] text-muted truncate">
-                              {[...new Set(driveItems.map((i) => i.task).filter(Boolean))].slice(0, 2).join(", ")}
+                            <span className="text-[10px] text-muted truncate">
+                              {[...new Set(driveItems.map((i) => i.task).filter(Boolean))].slice(0, 1).join("") || "Ready"}
                             </span>
                             {!disabled && (
                               <button
@@ -1257,7 +1783,7 @@ export function StoragePicker({
                                     : "bg-[#0052CC] text-white hover:bg-[#0047B3]"
                                 )}
                               >
-                                {isSelected ? "Selected ✓" : "Use Drive"}
+                                {isSelected ? "Selected ✓" : "Use"}
                               </button>
                             )}
                           </div>
@@ -1278,15 +1804,25 @@ export function StoragePicker({
                       className="field-input w-full pl-8 text-[12.5px]"
                     />
                   </div>
-                  {selectedDriveFilter !== "ALL" && (
+                  <div className="flex items-center gap-2">
                     <button
                       type="button"
-                      onClick={() => setSelectedDriveFilter("ALL")}
-                      className="text-[12px] font-semibold text-[#0052CC] hover:underline cursor-pointer"
+                      onClick={() => setExplorerTab("addEntry")}
+                      className="btn-ghost border border-line text-[11.5px] font-semibold flex items-center gap-1"
                     >
-                      Showing {selectedDriveFilter} · Show All Drives
+                      <FolderOpen className="h-3 w-3 text-emerald-600" />
+                      + Register Folder Data
                     </button>
-                  )}
+                    {selectedDriveFilter !== "ALL" && (
+                      <button
+                        type="button"
+                        onClick={() => setSelectedDriveFilter("ALL")}
+                        className="text-[12px] font-semibold text-[#0052CC] hover:underline cursor-pointer"
+                      >
+                        Showing {selectedDriveFilter} · Show All
+                      </button>
+                    )}
+                  </div>
                 </div>
 
                 {/* Folder & Asset Contents Table */}
@@ -1303,41 +1839,268 @@ export function StoragePicker({
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-line/60">
-                      {filteredItems.map((item) => (
-                        <tr key={item.id} className="hover:bg-canvas/50">
-                          <td className="py-2 px-3 font-mono font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
-                            {item.storageName}
-                          </td>
-                          <td className="py-2 px-3 font-semibold text-ink">
-                            {item.task}
-                          </td>
-                          <td className="py-2 px-3 text-muted font-mono text-[11px]">
-                            {item.dataLocation || "—"}
-                          </td>
-                          <td className="py-2 px-3 text-muted whitespace-nowrap">
-                            {item.progress || "—"}
-                          </td>
-                          <td className="py-2 px-3 text-muted whitespace-nowrap">
-                            {item.reviewer || "—"}
-                          </td>
-                          <td className="py-2 px-3 text-right whitespace-nowrap">
-                            {!disabled && (
-                              <button
-                                type="button"
-                                onClick={() => handlePickDriveByName(item.storageName)}
-                                className="text-[11px] font-bold text-[#0052CC] hover:underline cursor-pointer"
-                              >
-                                Pick {item.storageName}
-                              </button>
-                            )}
+                      {filteredItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={6} className="py-8 text-center text-muted">
+                            No drive folders match your search. Click &quot;+ Register Folder&quot; to add data.
                           </td>
                         </tr>
-                      ))}
+                      ) : (
+                        filteredItems.map((item) => (
+                          <tr key={item.id} className="hover:bg-canvas/50">
+                            <td className="py-2 px-3 font-mono font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
+                              {item.storageName}
+                            </td>
+                            <td className="py-2 px-3 font-semibold text-ink">
+                              {item.task}
+                            </td>
+                            <td className="py-2 px-3 text-muted font-mono text-[11px]">
+                              {item.dataLocation || "—"}
+                            </td>
+                            <td className="py-2 px-3 text-muted whitespace-nowrap">
+                              {item.progress || "—"}
+                            </td>
+                            <td className="py-2 px-3 text-muted whitespace-nowrap">
+                              {item.reviewer || "—"}
+                            </td>
+                            <td className="py-2 px-3 text-right whitespace-nowrap">
+                              {!disabled && (
+                                <button
+                                  type="button"
+                                  onClick={() => handlePickDriveByName(item.storageName)}
+                                  className="text-[11px] font-bold text-[#0052CC] hover:underline cursor-pointer"
+                                >
+                                  Pick {item.storageName}
+                                </button>
+                              )}
+                            </td>
+                          </tr>
+                        ))
+                      )}
                     </tbody>
                   </table>
                 </div>
               </div>
-            ) : (
+            )}
+
+            {/* Tab: Add Universal Hard Drive */}
+            {explorerTab === "addDrive" && (
+              <form onSubmit={handleCreateUniversalDriveSubmit} className="p-6 space-y-4 overflow-y-auto">
+                <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 p-3.5 text-[12.5px] text-slate-700 dark:text-slate-300 space-y-1">
+                  <div className="font-bold text-ink flex items-center gap-1.5">
+                    <HardDrive className="h-4 w-4 text-[#0052CC]" /> Add Universal Studio Hard Drive
+                  </div>
+                  <p>
+                    Universal hard drives are shared studio inventory accessible to the entire team. Anyone can select this drive and register project folders to it.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Drive Name / Identifier *
+                    </label>
+                    <input
+                      required
+                      value={newDriveName}
+                      onChange={(e) => setNewDriveName(e.target.value)}
+                      placeholder="e.g. LACIE 4TB Rugged / Editor 5 (WD)"
+                      className="field-input w-full text-[13px]"
+                      autoFocus
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Drive Type
+                    </label>
+                    <select
+                      value={newDriveType}
+                      onChange={(e) => setNewDriveType(e.target.value)}
+                      className="field-input w-full text-[13px]"
+                    >
+                      <option value="External SSD">External SSD</option>
+                      <option value="External HDD">External HDD</option>
+                      <option value="RAID Enclosure">RAID Enclosure</option>
+                      <option value="NAS / Cloud Storage">NAS / Cloud Storage</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Capacity
+                    </label>
+                    <input
+                      value={newDriveCapacity}
+                      onChange={(e) => setNewDriveCapacity(e.target.value)}
+                      placeholder="e.g. 4TB / 8TB"
+                      className="field-input w-full text-[13px]"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Physical Location / Custodian
+                    </label>
+                    <input
+                      value={newDriveLocation}
+                      onChange={(e) => setNewDriveLocation(e.target.value)}
+                      placeholder="e.g. Studio Shelf 2 / Karim Desk"
+                      className="field-input w-full text-[13px]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Notes / Filesystem
+                  </label>
+                  <input
+                    value={newDriveNotes}
+                    onChange={(e) => setNewDriveNotes(e.target.value)}
+                    placeholder="e.g. APFS formatted, USB-C 3.2 Gen 2 cable attached"
+                    className="field-input w-full text-[13px]"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => setExplorerTab("browse")}
+                    className="btn-ghost text-[12px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingDrive || !newDriveName.trim()}
+                    className="btn-primary text-[12px] px-4 cursor-pointer"
+                  >
+                    {creatingDrive ? "Adding Drive..." : "Save Universal Drive"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Tab: Register Folder Data to Drive */}
+            {explorerTab === "addEntry" && (
+              <form onSubmit={handleAddDriveEntrySubmit} className="p-6 space-y-4 overflow-y-auto">
+                <div className="rounded-lg border border-emerald-200 dark:border-emerald-900 bg-emerald-50/60 dark:bg-emerald-950/30 p-3.5 text-[12.5px] text-slate-700 dark:text-slate-300 space-y-1">
+                  <div className="font-bold text-ink flex items-center gap-1.5">
+                    <FolderOpen className="h-4 w-4 text-emerald-600" /> Store Information: Register Folder / Assets to Drive
+                  </div>
+                  <p>
+                    Record what project, folder path, and assets are stored on this drive so any team member can easily locate physical footage and project libraries.
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Target Hard Drive *
+                    </label>
+                    <select
+                      required
+                      value={entryDriveId}
+                      onChange={(e) => setEntryDriveId(e.target.value)}
+                      className="field-input w-full text-[13px]"
+                    >
+                      <option value="">— Select Target Drive —</option>
+                      {storages.map((s) => (
+                        <option key={s.id} value={s.id}>
+                          {s.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Project / Task Name *
+                    </label>
+                    <input
+                      required
+                      value={entryTaskName}
+                      onChange={(e) => setEntryTaskName(e.target.value)}
+                      placeholder="e.g. Atomberg Enzel DVC / Ferrari Reels"
+                      className="field-input w-full text-[13px]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Folder & Asset Path
+                  </label>
+                  <input
+                    value={entryFolderPath}
+                    onChange={(e) => setEntryFolderPath(e.target.value)}
+                    placeholder="e.g. /Atomberg/Enzel_DVC/01_RAW_FOOTAGE/Camera_A"
+                    className="field-input w-full font-mono text-[12.5px]"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Progress / Status
+                    </label>
+                    <select
+                      value={entryStatus}
+                      onChange={(e) => setEntryStatus(e.target.value)}
+                      className="field-input w-full text-[13px]"
+                    >
+                      <option value="Completed">Completed</option>
+                      <option value="In Progress">In Progress</option>
+                      <option value="Backed Up">Backed Up</option>
+                      <option value="Archived">Archived</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Reviewer / Lead Editor
+                    </label>
+                    <input
+                      value={entryReviewer}
+                      onChange={(e) => setEntryReviewer(e.target.value)}
+                      placeholder="e.g. Sachin / Karim"
+                      className="field-input w-full text-[13px]"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Notes
+                  </label>
+                  <input
+                    value={entryNotes}
+                    onChange={(e) => setEntryNotes(e.target.value)}
+                    placeholder="e.g. Includes color grade LUTs and clean audio WAVs"
+                    className="field-input w-full text-[13px]"
+                  />
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => setExplorerTab("browse")}
+                    className="btn-ghost text-[12px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addingEntry || !entryDriveId || !entryTaskName.trim()}
+                    className="btn-primary text-[12px] px-4 cursor-pointer"
+                  >
+                    {addingEntry ? "Registering Data..." : "Store Folder Information"}
+                  </button>
+                </div>
+              </form>
+            )}
+
+            {/* Tab: CSV Import */}
+            {explorerTab === "import" && (
               <form onSubmit={handleImportSheet} className="p-6 space-y-4 overflow-y-auto">
                 <div className="rounded-lg border border-blue-200 dark:border-blue-900 bg-blue-50/60 dark:bg-blue-950/30 p-3.5 text-[12.5px] text-slate-700 dark:text-slate-300 space-y-1">
                   <div className="font-bold text-ink">
@@ -1386,12 +2149,12 @@ export function StoragePicker({
                     onClick={() => setExplorerTab("browse")}
                     className="btn-ghost text-[12px]"
                   >
-                    Back to Drives
+                    Back to Directory
                   </button>
                   <button
                     type="submit"
                     disabled={importing || (!sheetUrl.trim() && !csvText.trim())}
-                    className="btn-primary text-[12px] px-4"
+                    className="btn-primary text-[12px] px-4 cursor-pointer"
                   >
                     {importing ? "Syncing Master Drives..." : "Import & Sync Master Drive List"}
                   </button>

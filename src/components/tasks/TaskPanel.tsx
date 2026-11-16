@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertTriangle, Archive, ArchiveRestore, Calendar, CalendarDays, Check, CheckSquare, ChevronDown, Clock, ExternalLink, Flame, FolderGit2, Link2, Lock, MessageSquare, Paperclip, PanelRightClose, Pause, Play, Plus, Send, Sparkles, Trash2, UserPlus, Wand2, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Calendar, CalendarDays, Check, CheckSquare, ChevronDown, Clock, ExternalLink, Flame, FolderGit2, Link2, Lock, MessageSquare, Paperclip, PanelRightClose, Pause, Play, Plus, Send, Sparkles, Target, Trash2, UserPlus, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Avatar from "@/components/Avatar";
-import { addCollaborator, addTimeEntry, addUpdate, deleteTask, deleteTimeEntry, deleteUpdate, getTaskThread, getTimeEntries, removeCollaborator, requestDeadlineExtension, setArchived, startWorkSession, stopWorkSession, type ActivityDTO, type AttachmentDTO, type SubtaskDTO, type TimeEntryDTO, type UpdateDTO } from "@/lib/actions";
+import { addCollaborator, addTimeEntry, addUpdate, createGoal, deleteTask, deleteTimeEntry, deleteUpdate, getTaskThread, getTimeEntries, removeCollaborator, requestDeadlineExtension, setArchived, startWorkSession, stopWorkSession, type ActivityDTO, type AttachmentDTO, type SubtaskDTO, type TimeEntryDTO, type UpdateDTO } from "@/lib/actions";
 import {
   getActiveSession,
   setActiveSession,
@@ -14,7 +14,7 @@ import {
   formatElapsed,
 } from "@/lib/session";
 import { PLATFORMS, PRIORITIES, TYPES, WORK_TYPES } from "@/lib/constants";
-import type { BrandDTO, PersonDTO, StorageDTO, TaskDTO } from "@/lib/dto";
+import type { BrandDTO, GoalDTO, PersonDTO, StorageDTO, TaskDTO } from "@/lib/dto";
 import { canEditField, canManageCollaborators } from "@/lib/rbac";
 import { cn, fmtDate, fmtDateTime, fromInputDateTime, toInputDate, toInputDateTime } from "@/lib/utils";
 import { dropPatch } from "@/lib/board";
@@ -30,6 +30,8 @@ type Props = {
   people: PersonDTO[];
   brands: BrandDTO[];
   storages: StorageDTO[];
+  goals?: GoalDTO[];
+  onGoalCreated?: (g: GoalDTO) => void;
   onStorageCreated: (s: StorageDTO) => void;
   viewer: { id: string; role: string; seeAll: boolean; admin: boolean; brandIds?: string[] };
   onClose: () => void;
@@ -87,8 +89,15 @@ function RichText({ text, names = [] }: { text: string; names?: string[] }) {
   );
 }
 
-export default function TaskPanel({ task: t, people, brands, storages, onStorageCreated, viewer, onClose, onUpdate, onRemoved, onReplace }: Props) {
+export default function TaskPanel({ task: t, people, brands, storages, goals = [], onGoalCreated, onStorageCreated, viewer, onClose, onUpdate, onRemoved, onReplace }: Props) {
   const { seeAll, admin, id: viewerId } = viewer;
+  const [allGoals, setAllGoals] = useState<GoalDTO[]>(goals);
+  useEffect(() => { if (goals) setAllGoals(goals); }, [goals]);
+  const [createGoalOpen, setCreateGoalOpen] = useState(false);
+  const [newGoalTitle, setNewGoalTitle] = useState("");
+  const [newGoalDue, setNewGoalDue] = useState("");
+  const [newGoalOwner, setNewGoalOwner] = useState(t.assigneeId || viewerId);
+  const [creatingGoal, setCreatingGoal] = useState(false);
   const [updates, setUpdates] = useState<UpdateDTO[] | null>(null);
   const [activity, setActivity] = useState<ActivityDTO[]>([]);
   const [subtasks, setSubtasksRaw] = useState<SubtaskDTO[] | null>(null);
@@ -994,6 +1003,17 @@ export default function TaskPanel({ task: t, people, brands, storages, onStorage
                     items={subtasks}
                     setItems={setSubtasks}
                     people={people}
+                    goals={allGoals}
+                    onGoalCreated={(g) => {
+                      const fullGoal: GoalDTO = {
+                        id: g.id,
+                        title: g.title,
+                        status: "On track",
+                        progress: 0,
+                      };
+                      setAllGoals((xs) => (xs.some((x) => x.id === g.id) ? xs : [...xs, fullGoal]));
+                      onGoalCreated?.(fullGoal);
+                    }}
                     canEdit
                     onError={setErr}
                     defaultReporter={t.createdByName || "Admin"}
@@ -1092,6 +1112,35 @@ export default function TaskPanel({ task: t, people, brands, storages, onStorage
                           onClick={() => setCreateCampaignOpen(true)}
                           className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition shrink-0 cursor-pointer"
                           title="Add new campaign"
+                        >
+                          <Plus className="size-3.5" />
+                        </button>
+                      )}
+                    </div>
+                  </Row>
+
+                  {/* Point 1 Feedback: Goal Setup & Linking on Task */}
+                  <Row label="Goal">
+                    <div className="flex items-center gap-1.5 min-w-0 rounded px-1 py-0.5">
+                      <div className="min-w-0 flex-1">
+                        <CellSelect
+                          value={t.goalId ?? ""}
+                          disabled={!can("goalId")}
+                          options={[
+                            { value: "", label: "No goal set (Select or create goal)" },
+                            ...allGoals.map((g) => ({ value: g.id, label: `🎯 ${g.title} (${g.progress}%)` })),
+                          ]}
+                          onChange={(v) => {
+                            onUpdate(t.id, { goalId: v || null });
+                          }}
+                        />
+                      </div>
+                      {can("goalId") && (
+                        <button
+                          type="button"
+                          onClick={() => setCreateGoalOpen(true)}
+                          className="p-1 rounded text-slate-400 hover:text-blue-600 hover:bg-blue-50 dark:hover:bg-blue-950/40 transition shrink-0 cursor-pointer"
+                          title="Create new goal"
                         >
                           <Plus className="size-3.5" />
                         </button>
@@ -1802,6 +1851,138 @@ export default function TaskPanel({ task: t, people, brands, storages, onStorage
                   >
                     <Send className="size-3.5" />
                     <span>{stopModalBusy ? "Logging..." : "Submit Progress & Send Report"}</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+        )}
+
+        {/* Point 1 Feedback: Create Goal Modal on Task */}
+        {createGoalOpen && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-xs p-4"
+            onClick={() => setCreateGoalOpen(false)}
+          >
+            <div
+              className="w-full max-w-md rounded-xl border border-line bg-surface p-5 shadow-2xl space-y-4"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between border-b border-line pb-3">
+                <div className="flex items-center gap-2">
+                  <div className="p-1.5 rounded-lg bg-blue-500/10 text-blue-600">
+                    <Target className="h-4 w-4" />
+                  </div>
+                  <div>
+                    <h3 className="text-[15px] font-bold text-ink">Set New Goal</h3>
+                    <p className="text-[11.5px] text-muted">
+                      Add a performance goal for this campaign or team member
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setCreateGoalOpen(false)}
+                  className="p-1 rounded-md text-muted hover:text-ink hover:bg-canvas"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <form
+                onSubmit={async (e) => {
+                  e.preventDefault();
+                  if (!newGoalTitle.trim()) return;
+                  setCreatingGoal(true);
+                  try {
+                    const g = await createGoal({
+                      title: newGoalTitle.trim(),
+                      ownerId: newGoalOwner || null,
+                      brandId: t.brandId || null,
+                      dueDate: newGoalDue || null,
+                    });
+                    const createdGoal: GoalDTO = {
+                      id: g.id,
+                      title: g.title,
+                      ownerId: newGoalOwner || null,
+                      brandId: t.brandId || null,
+                      status: "On track",
+                      progress: 0,
+                    };
+                    setAllGoals((xs) => [...xs, createdGoal]);
+                    onGoalCreated?.(createdGoal);
+                    onUpdate(t.id, { goalId: g.id });
+                    setNewGoalTitle("");
+                    setNewGoalDue("");
+                    setCreateGoalOpen(false);
+                  } catch (err) {
+                    setErr(err instanceof Error ? err.message : "Failed to create goal");
+                  } finally {
+                    setCreatingGoal(false);
+                  }
+                }}
+                className="space-y-3"
+              >
+                <div>
+                  <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                    Goal Name / Target *
+                  </label>
+                  <input
+                    required
+                    value={newGoalTitle}
+                    onChange={(e) => setNewGoalTitle(e.target.value)}
+                    placeholder="e.g. Q4 Ferrari Campaign Reels / 15 Deliverables Delivered"
+                    className="field-input w-full text-[13px]"
+                    autoFocus
+                  />
+                </div>
+
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Member / Target Owner
+                    </label>
+                    <select
+                      value={newGoalOwner}
+                      onChange={(e) => setNewGoalOwner(e.target.value)}
+                      className="field-input w-full text-[12.5px]"
+                    >
+                      <option value="">Whole Campaign</option>
+                      {people.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-muted block mb-1">
+                      Target Date
+                    </label>
+                    <input
+                      type="date"
+                      value={newGoalDue}
+                      onChange={(e) => setNewGoalDue(e.target.value)}
+                      className="field-input w-full text-[12.5px]"
+                    />
+                  </div>
+                </div>
+
+                <div className="flex justify-end gap-2 pt-2 border-t border-line">
+                  <button
+                    type="button"
+                    onClick={() => setCreateGoalOpen(false)}
+                    className="btn-ghost text-[12px]"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={creatingGoal || !newGoalTitle.trim()}
+                    className="btn-primary text-[12px] px-4"
+                  >
+                    {creatingGoal ? "Saving..." : "Set & Link Goal"}
                   </button>
                 </div>
               </form>

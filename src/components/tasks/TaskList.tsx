@@ -179,10 +179,19 @@ export default function TaskList(p: Props) {
                       </div>
 
                       {/* Summary */}
-                      <div className="flex min-w-0 items-center gap-2 px-3 py-2">
+                      <div className="flex min-w-0 flex-wrap sm:flex-nowrap items-center gap-2 px-3 py-2">
                         <span className={cn("truncate font-medium text-ink", done && "text-muted line-through")}>
                           {t.title}
                         </span>
+                        {t.subtasks && t.subtasks.filter((s) => s.assigneeId === p.viewer.id).map((s) => (
+                          <span
+                            key={s.id}
+                            className="inline-flex shrink-0 items-center gap-1 rounded bg-blue-50 dark:bg-blue-950/40 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.2 text-[10.5px] font-semibold text-[#0052CC] dark:text-blue-300"
+                            title={`Dedicated subtask assigned to you: ${s.title} (${s.status})`}
+                          >
+                            🎯 Subtask: {s.title} ({s.status})
+                          </span>
+                        ))}
                         <DelayBadge t={t} />
                         {t.subtaskCount > 0 && (
                           <span className="inline-flex shrink-0 items-center gap-0.5 text-[10px] text-muted">

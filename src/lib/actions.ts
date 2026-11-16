@@ -50,7 +50,7 @@ const ENUMS: Record<string, readonly string[]> = {
 };
 const TEXT = new Set(["title", "type", "platform", "notes", "context", "workType"]);
 const DATES = new Set(["externalDeadline", "internalDeadline", "startAt", "endAt"]);
-const REFS = new Set(["brandId", "campaignId", "assigneeId", "storageId"]);
+const REFS = new Set(["brandId", "campaignId", "assigneeId", "storageId", "goalId"]);
 const NUMS = new Set(["version", "cost"]);
 const BOOLS = new Set(["onHold"]);
 
@@ -113,7 +113,7 @@ const FIELD_LABEL: Record<string, string> = {
   finalApproval: "Final approval", deliveryStatus: "Delivery", notes: "Notes", context: "Description",
   externalDeadline: "External deadline", internalDeadline: "Due date", brandId: "Brand", campaignId: "Campaign",
   assigneeId: "Assignee", workType: "Work Type", version: "Version", cost: "Cost",
-  onHold: "On hold", startAt: "Start", endAt: "End", storageId: "Storage",
+  onHold: "On hold", startAt: "Start", endAt: "End", storageId: "Storage", goalId: "Goal",
 };
 
 function coerce(field: string, raw: unknown): unknown {
@@ -228,6 +228,7 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
       if (f === "campaignId" && v) return (await prisma.campaign.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "assigneeId" && v) return (await prisma.user.findUnique({ where: { id: String(v) } }))?.name ?? "—";
       if (f === "storageId" && v) return (await prisma.storage.findUnique({ where: { id: String(v) } }))?.name ?? "—";
+      if (f === "goalId" && v) return (await prisma.goal.findUnique({ where: { id: String(v) } }))?.title ?? "—";
       return show(v, f);
     };
     await prisma.activity.createMany({
@@ -487,12 +488,59 @@ export async function deleteTask(id: string) {
 export type UpdateDTO = { id: string; authorId: string | null; authorName: string; body: string; createdAt: string };
 export type ActivityDTO = { id: string; actorName: string; field: string; fromValue: string | null; toValue: string | null; createdAt: string };
 
-export type SubtaskDTO = { id: string; title: string; assigneeId: string | null; dueDate: string | null; done: boolean };
+export type SubtaskDTO = {
+  id: string;
+  projectId: string;
+  projectCode?: string;
+  projectTitle?: string;
+  brandName?: string | null;
+  title: string;
+  description: string | null;
+  assigneeId: string | null;
+  assigneeName?: string | null;
+  dueDate: string | null;
+  status: string;
+  priority: string;
+  done: boolean;
+  timeSpentMinutes: number;
+  goalId: string | null;
+  goalTitle?: string | null;
+};
 export type AttachmentDTO = { id: string; name: string; url: string; mimeType: string | null; iconUrl: string | null; addedByName: string; createdAt: string };
 type Thread = { updates: UpdateDTO[]; activity: ActivityDTO[]; subtasks: SubtaskDTO[]; attachments: AttachmentDTO[] };
 
-const subtaskDTO = (x: { id: string; title: string; assigneeId: string | null; dueDate: Date | null; done: boolean }): SubtaskDTO => ({
-  id: x.id, title: x.title, assigneeId: x.assigneeId, dueDate: x.dueDate?.toISOString() ?? null, done: x.done,
+const subtaskDTO = (x: {
+  id: string;
+  projectId: string;
+  title: string;
+  description?: string | null;
+  assigneeId: string | null;
+  assignee?: { name: string } | null;
+  project?: { code: string; title: string; brand?: { name: string } | null } | null;
+  dueDate: Date | null;
+  status?: string;
+  priority?: string;
+  done: boolean;
+  timeSpentMinutes?: number;
+  goalId?: string | null;
+  goal?: { title: string } | null;
+}): SubtaskDTO => ({
+  id: x.id,
+  projectId: x.projectId,
+  projectCode: x.project?.code,
+  projectTitle: x.project?.title,
+  brandName: x.project?.brand?.name ?? null,
+  title: x.title,
+  description: x.description ?? null,
+  assigneeId: x.assigneeId,
+  assigneeName: x.assignee?.name ?? null,
+  dueDate: x.dueDate?.toISOString() ?? null,
+  status: x.status ?? (x.done ? "Done" : "Todo"),
+  priority: x.priority ?? "Medium",
+  done: x.done,
+  timeSpentMinutes: x.timeSpentMinutes ?? 0,
+  goalId: x.goalId ?? null,
+  goalTitle: x.goal?.title ?? null,
 });
 const attachmentDTO = (a: { id: string; name: string; url: string; mimeType: string | null; iconUrl: string | null; addedByName: string; createdAt: Date }): AttachmentDTO => ({
   ...a, createdAt: a.createdAt.toISOString(),
@@ -504,7 +552,15 @@ export async function getTaskThread(id: string): Promise<Thread> {
     prisma.project.findUnique({ where: { id }, select: accessSelect }),
     prisma.update.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" } }),
     prisma.activity.findMany({ where: { projectId: id }, orderBy: { createdAt: "desc" }, take: 50 }),
-    prisma.subtask.findMany({ where: { projectId: id }, orderBy: [{ position: "asc" }, { createdAt: "asc" }] }),
+    prisma.subtask.findMany({
+      where: { projectId: id },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      include: {
+        assignee: { select: { name: true } },
+        goal: { select: { title: true } },
+        project: { select: { code: true, title: true, brand: { select: { name: true } } } },
+      },
+    }),
     prisma.attachment.findMany({ where: { projectId: id }, orderBy: { createdAt: "asc" } }),
   ]);
   if (!p || !canViewProject(me, access(p))) throw new Error("Not allowed");
@@ -519,8 +575,19 @@ export async function getTaskThread(id: string): Promise<Thread> {
   };
 }
 
-// ---------- Subtasks ----------
-export async function addSubtask(projectId: string, input: { title: string; assigneeId?: string | null; dueDate?: string | null }): Promise<SubtaskDTO> {
+// ---------- Subtasks (Dedicated Work inside Parent Task) ----------
+export async function addSubtask(
+  projectId: string,
+  input: {
+    title: string;
+    description?: string | null;
+    assigneeId?: string | null;
+    dueDate?: string | null;
+    status?: string;
+    priority?: string;
+    goalId?: string | null;
+  }
+): Promise<SubtaskDTO> {
   const { me, p } = await viewTask(projectId);
   const title = input.title?.trim();
   if (!title) throw new Error("Give the subtask a name");
@@ -529,9 +596,18 @@ export async function addSubtask(projectId: string, input: { title: string; assi
     data: {
       projectId,
       title,
+      description: input.description?.trim() || null,
       assigneeId: input.assigneeId || null,
       dueDate: input.dueDate ? new Date(input.dueDate) : null,
+      status: input.status || "Todo",
+      priority: input.priority || "Medium",
+      goalId: input.goalId || null,
       position: count,
+    },
+    include: {
+      assignee: { select: { name: true } },
+      goal: { select: { title: true } },
+      project: { select: { code: true, title: true, brand: { select: { name: true } } } },
     },
   });
   later("subtask added", async () => {
@@ -555,7 +631,16 @@ async function notifySubtask(userId: string, by: string, title: string, taskTitl
 
 export async function updateSubtask(
   id: string,
-  patch: { title?: string; assigneeId?: string | null; dueDate?: string | null; done?: boolean },
+  patch: {
+    title?: string;
+    description?: string | null;
+    assigneeId?: string | null;
+    dueDate?: string | null;
+    done?: boolean;
+    status?: string;
+    priority?: string;
+    goalId?: string | null;
+  },
 ): Promise<SubtaskDTO> {
   const before = await prisma.subtask.findUnique({ where: { id } });
   if (!before) throw new Error("Subtask not found");
@@ -565,10 +650,30 @@ export async function updateSubtask(
     if (!patch.title.trim()) throw new Error("Subtask name can't be empty");
     data.title = patch.title.trim();
   }
+  if (patch.description !== undefined) data.description = patch.description?.trim() || null;
   if (patch.assigneeId !== undefined) data.assigneeId = patch.assigneeId || null;
   if (patch.dueDate !== undefined) data.dueDate = patch.dueDate ? new Date(patch.dueDate) : null;
-  if (patch.done !== undefined) data.done = !!patch.done;
-  const st = await prisma.subtask.update({ where: { id }, data });
+  if (patch.status !== undefined) {
+    data.status = patch.status;
+    if (patch.status === "Done") data.done = true;
+    else if (patch.status === "Todo" || patch.status === "In Progress") data.done = false;
+  }
+  if (patch.priority !== undefined) data.priority = patch.priority;
+  if (patch.goalId !== undefined) data.goalId = patch.goalId || null;
+  if (patch.done !== undefined) {
+    data.done = !!patch.done;
+    if (patch.done) data.status = "Done";
+    else if (data.status === "Done") data.status = "Todo";
+  }
+  const st = await prisma.subtask.update({
+    where: { id },
+    data,
+    include: {
+      assignee: { select: { name: true } },
+      goal: { select: { title: true } },
+      project: { select: { code: true, title: true, brand: { select: { name: true } } } },
+    },
+  });
   later("subtask updated", async () => {
     if (patch.done !== undefined && patch.done !== before.done)
       await prisma.activity.create({ data: { projectId: st.projectId, actorName: me.name, field: "Subtask", toValue: `${st.done ? "Completed" : "Reopened"} "${st.title}"` } });
@@ -576,6 +681,49 @@ export async function updateSubtask(
       await notifySubtask(st.assigneeId, me.name, st.title, p.title, st.projectId);
   });
   return subtaskDTO(st);
+}
+
+// Log time specifically against a subtask (dedicated work tracker)
+export async function logSubtaskTime(input: {
+  subtaskId: string;
+  projectId: string;
+  durationMinutes: number;
+  notes?: string;
+}): Promise<SubtaskDTO> {
+  const me = await requireTeamUser();
+  const subtask = await prisma.subtask.findUnique({
+    where: { id: input.subtaskId },
+    include: { project: true },
+  });
+  if (!subtask) throw new Error("Subtask not found");
+
+  const duration = Math.max(1, Math.round(input.durationMinutes));
+
+  await prisma.timeEntry.create({
+    data: {
+      projectId: input.projectId,
+      subtaskId: input.subtaskId,
+      userId: me.id,
+      durationMinutes: duration,
+      notes: input.notes || `Subtask: ${subtask.title}`,
+      workType: subtask.title,
+    },
+  });
+
+  const updated = await prisma.subtask.update({
+    where: { id: input.subtaskId },
+    data: {
+      timeSpentMinutes: { increment: duration },
+      status: subtask.status === "Todo" ? "In Progress" : subtask.status,
+    },
+    include: {
+      assignee: { select: { name: true } },
+      goal: { select: { title: true } },
+      project: { select: { code: true, title: true, brand: { select: { name: true } } } },
+    },
+  });
+
+  return subtaskDTO(updated);
 }
 
 export async function deleteSubtask(id: string) {
@@ -617,15 +765,111 @@ export async function deleteAttachment(id: string) {
   );
 }
 
-// ---------- Storage names (hard drives / folders) ----------
-export async function createStorage(name: string): Promise<StorageDTO> {
+// ---------- Universal Hard Drives & Storage Directory ----------
+export async function createUniversalDrive(input: {
+  name: string;
+  type?: string;
+  location?: string;
+  capacity?: string;
+  notes?: string;
+}): Promise<StorageDTO> {
   await requireTeamUser();
-  const n = name.trim();
-  if (!n) throw new Error("Give the storage a name");
+  const n = input.name.trim();
+  if (!n) throw new Error("Give the hard drive a name");
   const existing = await prisma.storage.findFirst({ where: { name: { equals: n, mode: "insensitive" } } });
-  if (existing) return { id: existing.id, name: existing.name };
-  const s = await prisma.storage.create({ data: { name: n } });
-  return { id: s.id, name: s.name };
+  if (existing) {
+    const updated = await prisma.storage.update({
+      where: { id: existing.id },
+      data: {
+        type: input.type || existing.type,
+        location: input.location || existing.location,
+        capacity: input.capacity || existing.capacity,
+        notes: input.notes || existing.notes,
+      },
+    });
+    revalidatePath("/projects");
+    return { id: updated.id, name: updated.name, type: updated.type, location: updated.location, capacity: updated.capacity, notes: updated.notes };
+  }
+  const s = await prisma.storage.create({
+    data: {
+      name: n,
+      type: input.type || "External Drive",
+      location: input.location || null,
+      capacity: input.capacity || null,
+      notes: input.notes || null,
+    },
+  });
+  revalidatePath("/projects");
+  return { id: s.id, name: s.name, type: s.type, location: s.location, capacity: s.capacity, notes: s.notes };
+}
+
+export async function addDriveEntry(input: {
+  storageId: string;
+  taskName: string;
+  folderPath?: string | null;
+  status?: string;
+  reviewer?: string | null;
+  notes?: string | null;
+}) {
+  const me = await requireTeamUser();
+  const taskName = input.taskName?.trim();
+  if (!taskName) throw new Error("Project or folder name is required");
+  const entry = await prisma.storageEntry.create({
+    data: {
+      storageId: input.storageId,
+      taskName,
+      folderPath: input.folderPath?.trim() || null,
+      status: input.status || "Completed",
+      reviewer: input.reviewer?.trim() || me.name,
+      notes: input.notes?.trim() || null,
+    },
+  });
+  revalidatePath("/projects");
+  return entry;
+}
+
+export async function deleteDriveEntry(id: string) {
+  await requireTeamUser();
+  await prisma.storageEntry.delete({ where: { id } });
+  revalidatePath("/projects");
+}
+
+export async function getUniversalDrivesWithEntries() {
+  await requireTeamUser();
+  const storages = await prisma.storage.findMany({
+    orderBy: { name: "asc" },
+    include: {
+      entries: { orderBy: { createdAt: "desc" } },
+      projects: { select: { id: true, code: true, title: true, brand: { select: { name: true } } } },
+      _count: { select: { projects: true, entries: true } },
+    },
+  });
+  return storages.map((s) => ({
+    id: s.id,
+    name: s.name,
+    type: s.type,
+    location: s.location,
+    capacity: s.capacity,
+    notes: s.notes,
+    projectsCount: s._count.projects,
+    entriesCount: s._count.entries,
+    projects: s.projects.map((p) => ({ id: p.id, code: p.code, title: p.title, brandName: p.brand?.name ?? null })),
+    entries: s.entries.map((e) => ({
+      id: e.id,
+      storageId: e.storageId,
+      storageName: s.name,
+      taskName: e.taskName,
+      folderPath: e.folderPath,
+      status: e.status || "Completed",
+      reviewer: e.reviewer,
+      notes: e.notes,
+      createdAt: e.createdAt.toISOString(),
+    })),
+  }));
+}
+
+export async function createStorage(name: string): Promise<StorageDTO> {
+  return createUniversalDrive({ name });
 }
 
 export async function deleteStorage(id: string) {
@@ -633,6 +877,7 @@ export async function deleteStorage(id: string) {
   if (!isAdmin(me)) throw new Error("Only admins can remove storage names");
   await prisma.storage.delete({ where: { id } });
   revalidatePath("/brands");
+  revalidatePath("/projects");
 }
 
 // ---------- Brand workspace members ----------
@@ -994,15 +1239,27 @@ export async function createProject(input: { name: string; color?: string }): Pr
 
 // ---------- Goals ----------
 const GOAL_STATUSES = ["On track", "At risk", "Off track", "Achieved"];
-export async function createGoal(input: { title: string; ownerId?: string | null; brandId?: string | null; dueDate?: string | null }) {
+export async function createGoal(input: {
+  title: string;
+  ownerId?: string | null;
+  brandId?: string | null;
+  dueDate?: string | null;
+}): Promise<{ id: string; title: string }> {
   const me = await requireTeamUser();
-  if (!canSeeAll(me)) throw new Error("Only admins and managers can add goals");
   const title = input.title?.trim();
   if (!title) throw new Error("Give the goal a name");
-  await prisma.goal.create({
-    data: { title, ownerId: input.ownerId || me.id, brandId: input.brandId || null, dueDate: input.dueDate ? new Date(input.dueDate) : null },
+  const g = await prisma.goal.create({
+    data: {
+      title,
+      ownerId: input.ownerId || me.id,
+      brandId: input.brandId || null,
+      dueDate: input.dueDate ? new Date(input.dueDate) : null,
+    },
   });
   revalidatePath("/goals");
+  revalidatePath("/projects");
+  revalidatePath("/my-tasks");
+  return { id: g.id, title: g.title };
 }
 
 export async function updateGoal(id: string, patch: { title?: string; ownerId?: string | null; dueDate?: string | null; progress?: number; status?: string; notes?: string }) {

@@ -8,7 +8,7 @@ import { useRouter, useSearchParams, usePathname } from "next/navigation";
 import { useCallback, useEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createTask, updateTask } from "@/lib/actions";
 import { PLATFORMS, PRIORITIES, TYPES, WORK_TYPES } from "@/lib/constants";
-import type { BrandDTO, PersonDTO, StorageDTO, TaskDTO } from "@/lib/dto";
+import type { BrandDTO, GoalDTO, PersonDTO, StorageDTO, TaskDTO } from "@/lib/dto";
 import { BOARD_COLUMNS, boardColumn, computeStage, isDone, STAGE_GROUPS, type BoardKey } from "@/lib/status";
 import { cn, fromInputDateTime } from "@/lib/utils";
 import TaskBoard, { dropPatch } from "./TaskBoard";
@@ -32,6 +32,7 @@ type Props = {
   people: PersonDTO[];
   brands: BrandDTO[];
   storages: StorageDTO[];
+  goals?: GoalDTO[];
   viewer: { id: string; role: string; seeAll: boolean; admin: boolean; department: string; brandIds: string[] };
   mode: "all" | "mine" | "brand" | "archive";
   fixedBrandId?: string;
@@ -58,8 +59,10 @@ export default function TaskWorkspace(props: Props) {
 
   const [tasks, setTasks] = useState(props.tasks);
   const [storages, setStorages] = useState(props.storages);
+  const [goals, setGoals] = useState<GoalDTO[]>(props.goals ?? []);
   useEffect(() => setStorages(props.storages), [props.storages]);
   useEffect(() => setTasks(props.tasks), [props.tasks]);
+  useEffect(() => { if (props.goals) setGoals(props.goals); }, [props.goals]);
 
   // Saves don't wait for a page rebuild (that's what keeps clicks fast). Once
   // edits settle, quietly re-sync in the background so every page, board and
@@ -1125,6 +1128,7 @@ export default function TaskWorkspace(props: Props) {
                 tasks={matching}
                 selectedId={selectedId}
                 showAssignee={mode !== "mine"}
+                viewerId={viewer.id}
                 onOpen={(id) => open(id)}
                 onMove={(t, to: BoardKey) => {
                   const patch = dropPatch(t, to);
@@ -1158,6 +1162,8 @@ export default function TaskWorkspace(props: Props) {
           people={people}
           brands={brands}
           storages={storages}
+          goals={goals}
+          onGoalCreated={(g) => setGoals((xs) => (xs.some((x) => x.id === g.id) ? xs : [...xs, g]))}
           onStorageCreated={(st) => setStorages((xs) => (xs.some((x) => x.id === st.id) ? xs : [...xs, st].sort((a, b) => a.name.localeCompare(b.name))))}
           viewer={viewer}
           onClose={() => open(null)}

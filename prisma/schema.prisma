@@ -131,6 +131,9 @@ model Project {
   storageId String?
   storage   Storage? @relation(fields: [storageId], references: [id], onDelete: SetNull)
 
+  goalId String?
+  goal   Goal?   @relation(fields: [goalId], references: [id], onDelete: SetNull)
+
   briefStage     String @default("Not Started")
   scriptStage    String @default("Not Started")
   preProStage    String @default("Not Started")
@@ -176,6 +179,8 @@ model TimeEntry {
   id              String   @id @default(cuid())
   projectId       String
   project         Project  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  subtaskId       String?
+  subtask         Subtask? @relation(fields: [subtaskId], references: [id], onDelete: SetNull)
   userId          String
   user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   date            DateTime @default(now())
@@ -186,6 +191,7 @@ model TimeEntry {
   createdAt       DateTime @default(now())
 
   @@index([projectId])
+  @@index([subtaskId])
   @@index([userId, date])
 }
 
@@ -240,29 +246,59 @@ model AutomationRun {
 
 // Where the footage / project files live (hard drive, NAS folder…)
 model Storage {
-  id        String    @id @default(cuid())
-  name      String    @unique
-  createdAt DateTime  @default(now())
-  projects  Project[]
+  id          String         @id @default(cuid())
+  name        String         @unique
+  type        String?        @default("External Drive") // SSD, HDD, RAID, NAS, Cloud
+  location    String?        // Studio Bay, Shelf, With Editor
+  capacity    String?        // 2TB, 4TB, 8TB
+  notes       String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt @default(now())
+  projects    Project[]
+  entries     StorageEntry[]
 }
 
-// Asana-style subtasks: a checklist of small tasks inside a task
-model Subtask {
-  id         String    @id @default(cuid())
-  projectId  String
-  project    Project   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  title      String
-  assigneeId String?
-  assignee   User?     @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
-  dueDate    DateTime?
-  done       Boolean   @default(false)
-  position   Int       @default(0)
-  createdAt  DateTime  @default(now())
+model StorageEntry {
+  id          String   @id @default(cuid())
+  storageId   String
+  storage     Storage  @relation(fields: [storageId], references: [id], onDelete: Cascade)
+  taskName    String
+  folderPath  String?
+  status      String?  @default("Active")
+  reviewer    String?
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
 
+  @@index([storageId])
+}
+
+// Asana-style subtasks: dedicated work inside a main task with full functions
+model Subtask {
+  id                String      @id @default(cuid())
+  projectId         String
+  project           Project     @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  title             String
+  description       String?     // Dedicated brief / delivery specs for this subtask
+  assigneeId        String?
+  assignee          User?       @relation(fields: [assigneeId], references: [id], onDelete: SetNull)
+  dueDate           DateTime?
+  status            String      @default("Todo") // Todo | In Progress | In Review | Done
+  priority          String      @default("Medium") // Low | Medium | High | Urgent
+  done              Boolean     @default(false)
+  position          Int         @default(0)
+  timeSpentMinutes  Int         @default(0)
+  goalId            String?
+  goal              Goal?       @relation(fields: [goalId], references: [id], onDelete: SetNull)
+  createdAt         DateTime    @default(now())
+  updatedAt         DateTime    @updatedAt @default(now())
+
+  timeEntries           TimeEntry[]
   googleCalendarEventId String?
 
   @@index([projectId])
   @@index([assigneeId])
+  @@index([goalId])
 }
 
 // Files on a task: Google Drive files / folders or any link
@@ -294,4 +330,7 @@ model Goal {
   notes     String?
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
+
+  projects  Project[]
+  subtasks  Subtask[]
 }

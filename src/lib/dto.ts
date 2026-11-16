@@ -29,6 +29,8 @@ export type TaskDTO = {
   endAt: string | null;
   storageId: string | null;
   storageName: string | null;
+  goalId: string | null;
+  goalTitle: string | null;
   briefStage: string;
   scriptStage: string;
   preProStage: string;
@@ -59,9 +61,24 @@ export type TaskDTO = {
   subtaskCount: number;
   subtaskDone: number;
   subtaskAssigneeIds: string[];
+  subtasks?: SubtaskSummaryDTO[];
   attachmentCount: number;
   addedOn: string;
   updatedAt: string;
+};
+
+export type SubtaskSummaryDTO = {
+  id: string;
+  title: string;
+  done: boolean;
+  status: string;
+  priority: string;
+  dueDate: string | null;
+  timeSpentMinutes: number;
+  assigneeId: string | null;
+  assigneeName: string | null;
+  goalId: string | null;
+  goalTitle: string | null;
 };
 
 export type PersonDTO = { id: string; name: string; department: string; active: boolean; hourlyRate?: number | null };
@@ -85,7 +102,36 @@ export type BrandDTO = {
   guidelines?: string | null;
   campaigns?: CampaignDTO[];
 };
-export type StorageDTO = { id: string; name: string };
+export type GoalDTO = {
+  id: string;
+  title: string;
+  ownerId?: string | null;
+  brandId?: string | null;
+  status: string;
+  progress: number;
+};
+export type StorageEntryDTO = {
+  id: string;
+  storageId: string;
+  storageName?: string;
+  taskName: string;
+  folderPath: string | null;
+  status: string;
+  reviewer: string | null;
+  notes: string | null;
+  createdAt: string;
+};
+export type StorageDTO = {
+  id: string;
+  name: string;
+  type?: string | null;
+  location?: string | null;
+  capacity?: string | null;
+  notes?: string | null;
+  entriesCount?: number;
+  projectsCount?: number;
+  entries?: StorageEntryDTO[];
+};
 export type TimeEntryDTO = {
   id: string;
   projectId: string;
@@ -108,7 +154,23 @@ export const taskInclude = {
   createdBy: { select: { id: true, name: true } },
   collaborators: { select: { id: true, name: true }, orderBy: { name: "asc" } },
   storage: { select: { id: true, name: true } },
-  subtasks: { select: { id: true, done: true, assigneeId: true } },
+  goal: { select: { id: true, title: true } },
+  subtasks: {
+    select: {
+      id: true,
+      title: true,
+      done: true,
+      status: true,
+      priority: true,
+      dueDate: true,
+      timeSpentMinutes: true,
+      assigneeId: true,
+      assignee: { select: { id: true, name: true } },
+      goalId: true,
+      goal: { select: { id: true, title: true } },
+    },
+    orderBy: { createdAt: "asc" },
+  },
   timeEntries: { select: { durationMinutes: true, hourlyRate: true } },
   updates: {
     take: 1,
@@ -125,7 +187,20 @@ type TaskRow = Project & {
   createdBy: { id: string, name: string } | null;
   collaborators: { id: string; name: string }[];
   storage?: { id: string; name: string } | null;
-  subtasks?: { id: string; done: boolean; assigneeId: string | null }[];
+  goal?: { id: string; title: string } | null;
+  subtasks?: {
+    id: string;
+    title: string;
+    done: boolean;
+    status?: string;
+    priority?: string;
+    dueDate?: Date | null;
+    timeSpentMinutes?: number;
+    assigneeId: string | null;
+    assignee?: { id: string; name: string } | null;
+    goalId?: string | null;
+    goal?: { id: string; title: string } | null;
+  }[];
   timeEntries?: { durationMinutes: number; hourlyRate: number | null }[];
   updates?: { id: string; body: string; authorName: string; createdAt: Date }[];
   _count?: { updates: number; attachments?: number };
@@ -162,6 +237,8 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     endAt: p.endAt?.toISOString() ?? null,
     storageId: p.storageId ?? null,
     storageName: p.storage?.name ?? null,
+    goalId: p.goalId ?? null,
+    goalTitle: p.goal?.title ?? null,
     briefStage: p.briefStage,
     scriptStage: p.scriptStage,
     preProStage: p.preProStage,
@@ -194,6 +271,19 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     subtaskCount: p.subtasks?.length ?? 0,
     subtaskDone: p.subtasks?.filter((x) => x.done).length ?? 0,
     subtaskAssigneeIds: [...new Set((p.subtasks ?? []).map((x) => x.assigneeId).filter((x): x is string => !!x))],
+    subtasks: (p.subtasks ?? []).map((s) => ({
+      id: s.id,
+      title: s.title,
+      done: s.done,
+      status: s.status || (s.done ? "Done" : "Todo"),
+      priority: s.priority || "Medium",
+      dueDate: s.dueDate ? (s.dueDate instanceof Date ? s.dueDate.toISOString() : String(s.dueDate)) : null,
+      timeSpentMinutes: s.timeSpentMinutes ?? 0,
+      assigneeId: s.assigneeId,
+      assigneeName: s.assignee?.name ?? null,
+      goalId: s.goalId ?? null,
+      goalTitle: s.goal?.title ?? null,
+    })),
     attachmentCount: p._count?.attachments ?? 0,
     addedOn: p.addedOn.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
