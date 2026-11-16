@@ -24,7 +24,11 @@ function getTransporter() {
   return transporter;
 }
 
-export const APP_URL = process.env.APP_URL || process.env.NEXTAUTH_URL || "http://localhost:3000";
+export const APP_URL =
+  (process.env.APP_URL && !process.env.APP_URL.includes("localhost") ? process.env.APP_URL : null) ||
+  (process.env.NEXTAUTH_URL && !process.env.NEXTAUTH_URL.includes("localhost") ? process.env.NEXTAUTH_URL : null) ||
+  (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : null) ||
+  "https://zone-six-smoky.vercel.app";
 
 function esc(s: string) {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");

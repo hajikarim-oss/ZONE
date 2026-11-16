@@ -4,6 +4,7 @@ import {
   AlertTriangle,
   Calculator,
   Check,
+  ChevronDown,
   DollarSign,
   ExternalLink,
   Plus,
@@ -80,6 +81,7 @@ export default function ProjectCostingPanel({
   const [editConfigOpen, setEditConfigOpen] = useState(false);
   const [addCostOpen, setAddCostOpen] = useState(false);
   const [saving, setSaving] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(false);
 
   // Add Direct Cost Form State
   const [costCategory, setCostCategory] = useState<DirectCostItem["category"]>("AI Credits");
@@ -310,7 +312,7 @@ export default function ProjectCostingPanel({
   return (
     <div
       className={cn(
-        "rounded-lg border p-3.5 space-y-3 shadow-xs transition",
+        "rounded-lg border p-3 shadow-xs transition",
         calc.alertTier === "critical_90"
           ? "border-rose-500/80 bg-rose-50/40 dark:bg-rose-950/20"
           : calc.alertTier === "warning_75"
@@ -318,32 +320,35 @@ export default function ProjectCostingPanel({
             : "border-line bg-surface"
       )}
     >
-      {/* Header */}
-      <div className="flex items-center justify-between gap-2 border-b border-line pb-2">
-        <div className="flex items-center gap-1.5">
-          <Calculator className="h-3.5 w-3.5 text-[#0052CC]" />
-          <span className="text-[11px] font-bold uppercase tracking-wider text-ink">
-            Project Costing · Budget vs Actual
+      {/* Header (Clickable Accordion) */}
+      <div className={cn("flex items-center justify-between gap-2", panelOpen && "border-b border-line pb-2 mb-3")}>
+        <button
+          type="button"
+          onClick={() => setPanelOpen((o) => !o)}
+          className="flex items-center gap-2 text-left cursor-pointer flex-1 min-w-0"
+        >
+          <Calculator className="h-3.5 w-3.5 text-[#0052CC] shrink-0" />
+          <span className="text-[12px] font-semibold text-ink">
+            Project Costing & Budget
           </span>
-        </div>
+          <span className="text-[11px] text-muted truncate">
+            · {calc.totalHours}h logged / {config.plannedHours}h planned · {calc.budgetUsedPct}% used
+          </span>
+          <ChevronDown className={cn("h-3.5 w-3.5 text-muted transition-transform ml-auto shrink-0", panelOpen && "rotate-180")} />
+        </button>
 
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 shrink-0">
           {calc.alertTier === "critical_90" && (
             <span className="inline-flex items-center gap-1 rounded bg-rose-600 px-1.5 py-0.5 text-[10px] font-bold text-white animate-pulse">
-              🚨 ≥90% BUDGET · FLAGGED RED
+              🚨 ≥90%
             </span>
           )}
           {calc.alertTier === "warning_75" && (
             <span className="inline-flex items-center gap-1 rounded bg-amber-500 px-1.5 py-0.5 text-[10px] font-bold text-white">
-              ⚠️ ≥75% Used · Admin & Mgr Alerted
+              ⚠️ ≥75%
             </span>
           )}
-          {calc.alertTier === "notice_50" && (
-            <span className="inline-flex items-center gap-1 rounded bg-blue-600/15 text-blue-700 dark:text-blue-300 px-1.5 py-0.5 text-[10px] font-bold">
-              ℹ️ ≥50% Used · Mgr Informed
-            </span>
-          )}
-          {(admin || seeAll) && (
+          {(admin || seeAll) && panelOpen && (
             <button
               type="button"
               onClick={() => setEditConfigOpen((o) => !o)}
@@ -355,6 +360,9 @@ export default function ProjectCostingPanel({
           )}
         </div>
       </div>
+
+      {panelOpen && (
+        <div className="space-y-3">
 
       {/* Extra Revision Scope Overage Warning */}
       {(t.revisionRound || 0) >= 3 && (
@@ -684,6 +692,8 @@ export default function ProjectCostingPanel({
             </button>
           </div>
         </form>
+      )}
+        </div>
       )}
     </div>
   );

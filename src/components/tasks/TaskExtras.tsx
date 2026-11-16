@@ -43,7 +43,7 @@ import {
 } from "@/lib/actions";
 import { driveConfigured, pickFromDrive } from "@/lib/drive-picker";
 import type { GoalDTO, PersonDTO, StorageDTO, StorageEntryDTO } from "@/lib/dto";
-import { cn, toInputDate } from "@/lib/utils";
+import { cn, fmtDate, toInputDate } from "@/lib/utils";
 import storageDataJson from "@/data/storage-management.json";
 
 export const PIPELINE_TEMPLATES = [
@@ -484,9 +484,9 @@ export function Subtasks({
           return (
             <div
               key={s.id}
-              className="group flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50/90 dark:hover:bg-white/[0.04] transition-colors"
+              className="group flex items-center justify-between gap-3 px-3 py-2.5 hover:bg-slate-50 dark:hover:bg-white/[0.04] transition-colors rounded"
             >
-              {/* Left Side: Checkbox + Title + Goal Chip + Icons */}
+              {/* Left Side: Checkbox + Title (Always Prominent) + Goal Chip */}
               <div className="flex items-center gap-2.5 min-w-0 flex-1">
                 <button
                   type="button"
@@ -506,12 +506,12 @@ export function Subtasks({
                 <button
                   type="button"
                   onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
-                  className="min-w-0 flex items-center gap-2 text-left cursor-pointer group/title"
-                  title="Click to open full dedicated subtask sheet"
+                  className="min-w-0 flex-1 flex items-center gap-2 text-left cursor-pointer group/title overflow-hidden"
+                  title="Click to open dedicated subtask sheet (Timer, Goal, Brief)"
                 >
                   <span
                     className={cn(
-                      "text-[13px] font-medium text-slate-800 dark:text-slate-200 group-hover/title:text-[#0052CC] dark:group-hover/title:text-blue-400 transition-colors truncate",
+                      "text-[13px] font-medium text-slate-800 dark:text-slate-200 group-hover/title:text-[#0052CC] dark:group-hover/title:text-blue-400 transition-colors truncate min-w-[60px]",
                       s.done && "text-muted line-through"
                     )}
                   >
@@ -520,16 +520,10 @@ export function Subtasks({
 
                   {s.goalTitle && (
                     <span
-                      className="shrink-0 max-w-[150px] truncate rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.5 text-[10px] font-semibold text-[#0052CC] dark:text-blue-300"
+                      className="shrink-0 max-w-[120px] truncate rounded bg-blue-50 dark:bg-blue-950/60 border border-blue-200 dark:border-blue-800/60 px-1.5 py-0.5 text-[10px] font-semibold text-[#0052CC] dark:text-blue-300"
                       title={`Goal: ${s.goalTitle}`}
                     >
                       🎯 {s.goalTitle}
-                    </span>
-                  )}
-
-                  {ex.campaign && !s.goalTitle && (
-                    <span className="shrink-0 max-w-[130px] truncate rounded bg-purple-50 dark:bg-purple-950/50 border border-purple-200 dark:border-purple-800/50 px-1.5 py-0.5 text-[10px] font-semibold text-purple-700 dark:text-purple-300">
-                      {ex.campaign}
                     </span>
                   )}
 
@@ -547,7 +541,7 @@ export function Subtasks({
                 </button>
               </div>
 
-              {/* Right Side: Clean Actions & Attributes */}
+              {/* Right Side: Clean Linear-style Metadata & Actions */}
               <div className="flex items-center gap-2 shrink-0">
                 {/* Status Dropdown */}
                 <select
@@ -557,7 +551,7 @@ export function Subtasks({
                     patch(s.id, { status: val, done: val === "Done" });
                   }}
                   className={cn(
-                    "rounded-full px-2 py-0.5 text-[10.5px] font-bold outline-none cursor-pointer border",
+                    "rounded px-2 py-0.5 text-[11px] font-semibold outline-none cursor-pointer border",
                     SUBTASK_STATUS_COLORS[statusVal] || "bg-canvas text-muted border-line"
                   )}
                   title="Subtask Status"
@@ -568,35 +562,55 @@ export function Subtasks({
                   <option value="Done">Done</option>
                 </select>
 
-                {/* Live Stopwatch Icon Toggle */}
-                <button
-                  type="button"
-                  onClick={() => handleToggleSubtaskTimer(s.id)}
-                  className={cn(
-                    "h-6 px-1.5 rounded text-[10.5px] font-mono font-bold flex items-center gap-1 transition cursor-pointer",
-                    isTimerRunning
-                      ? "bg-amber-600 text-white animate-pulse"
-                      : "text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40"
-                  )}
-                  title={isTimerRunning ? "Stop subtask timer" : "Start live stopwatch on subtask"}
-                >
-                  {isTimerRunning ? <Pause className="h-3 w-3" /> : <Clock className="h-3 w-3" />}
-                  {isTimerRunning && <span>{fmtSeconds(subtaskTimerSeconds)}</span>}
-                </button>
+                {/* Live Stopwatch Indicator (only when running) */}
+                {isTimerRunning && (
+                  <button
+                    type="button"
+                    onClick={() => handleToggleSubtaskTimer(s.id)}
+                    className="h-6 px-2 rounded bg-amber-600 hover:bg-amber-700 text-white text-[10.5px] font-mono font-bold flex items-center gap-1 animate-pulse cursor-pointer"
+                    title="Stop subtask timer & log"
+                  >
+                    <Pause className="h-3 w-3" />
+                    <span>{fmtSeconds(subtaskTimerSeconds)}</span>
+                  </button>
+                )}
 
-                {/* Assignee select */}
-                <div className="flex items-center gap-1">
-                  {s.assigneeId && (
+                {/* Due Date (Clean text pill, click to edit) */}
+                <div className="relative group/date" title={s.dueDate ? `Due: ${fmtDate(s.dueDate, true)}` : "Set due date"}>
+                  <span className={cn(
+                    "text-[11.5px] font-medium transition cursor-pointer px-1 py-0.5 rounded hover:bg-slate-100 dark:hover:bg-white/10",
+                    s.dueDate ? "text-slate-600 dark:text-slate-300" : "text-slate-400 opacity-0 group-hover:opacity-100"
+                  )}>
+                    {s.dueDate ? fmtDate(s.dueDate) : "Add date"}
+                  </span>
+                  <input
+                    type="date"
+                    value={toInputDate(s.dueDate)}
+                    onChange={(e) => patch(s.id, { dueDate: e.target.value || null })}
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                  />
+                </div>
+
+                {/* Assignee Avatar (Compact, click to reassign) */}
+                <div
+                  className="relative group/assignee cursor-pointer"
+                  title={s.assigneeId ? (people.find((p) => p.id === s.assigneeId)?.name || "Assignee") : "Assign team member"}
+                >
+                  {s.assigneeId ? (
                     <Avatar
                       name={people.find((p) => p.id === s.assigneeId)?.name || "User"}
-                      size={18}
+                      size={20}
                     />
+                  ) : (
+                    <div className="h-5 w-5 rounded-full border border-dashed border-slate-300 dark:border-slate-600 flex items-center justify-center text-[10px] text-slate-400 opacity-0 group-hover:opacity-100 hover:border-blue-500 hover:text-blue-500">
+                      <User className="h-2.5 w-2.5" />
+                    </div>
                   )}
                   <select
                     value={s.assigneeId ?? ""}
                     onChange={(e) => patch(s.id, { assigneeId: e.target.value || null })}
-                    className="max-w-[95px] truncate bg-transparent text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 outline-none cursor-pointer"
-                    title="Subtask Assignee"
+                    className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                    title="Change subtask assignee"
                   >
                     <option value="">Unassigned</option>
                     {active.map((p) => (
@@ -607,26 +621,17 @@ export function Subtasks({
                   </select>
                 </div>
 
-                {/* Due date input */}
-                <input
-                  type="date"
-                  value={toInputDate(s.dueDate)}
-                  onChange={(e) => patch(s.id, { dueDate: e.target.value || null })}
-                  className="w-[105px] bg-transparent text-[11px] text-slate-500 hover:text-slate-800 dark:hover:text-slate-200 outline-none cursor-pointer"
-                  title="Subtask Due Date"
-                />
-
-                {/* Maximize to full subtask sheet */}
+                {/* Maximize to full subtask sheet (Hover only) */}
                 <button
                   type="button"
                   onClick={() => !s.id.startsWith("tmp-") && setExpandedSubtaskId(s.id)}
-                  className="p-1 rounded text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40 transition cursor-pointer"
-                  title="Open dedicated subtask sheet (Timer, Goal, Brief)"
+                  className="p-1 rounded text-slate-400 hover:text-[#0052CC] hover:bg-blue-50 dark:hover:bg-blue-950/40 transition opacity-0 group-hover:opacity-100 cursor-pointer"
+                  title="Open dedicated subtask sheet (Stopwatch, Goal, Brief)"
                 >
                   <ExternalLink className="h-3.5 w-3.5" />
                 </button>
 
-                {/* Delete */}
+                {/* Delete (Hover only) */}
                 <button
                   type="button"
                   onClick={() => {
@@ -647,7 +652,7 @@ export function Subtasks({
         })}
 
         {canEdit && (
-          <form onSubmit={add} className="flex items-center gap-2 px-3 py-2 bg-slate-50/50 dark:bg-white/[0.02]">
+          <form onSubmit={add} className="flex items-center gap-2 px-3 py-2 bg-slate-50/40 dark:bg-white/[0.02]">
             <Plus className="h-4 w-4 shrink-0 text-slate-400" />
             <input
               value={title}
@@ -666,20 +671,6 @@ export function Subtasks({
           </form>
         )}
       </div>
-
-      {list.some((s) => s.assigneeId) && (
-        <div className="mt-1.5 flex flex-wrap gap-1 text-[11px] text-muted">
-          {[...new Set(list.filter((s) => s.assigneeId && !s.done).map((s) => s.assigneeId!))].map((id) => {
-            const p = people.find((x) => x.id === id);
-            return p ? (
-              <span key={id} className="inline-flex items-center gap-1">
-                <Avatar name={p.name} size={14} /> {p.name.split(" ")[0]}
-              </span>
-            ) : null;
-          })}
-          <span>have open subtasks (click any subtask row to open its full sheet)</span>
-        </div>
-      )}
 
       {/* Create Custom Subtask Modal */}
       {customModalOpen && (
