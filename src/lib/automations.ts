@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { APP_URL, emailHtml, sendMail } from "@/lib/mailer";
-import { adminUsers, alertFoundersOverdue, notify, sendSmartReminderStage } from "@/lib/notify";
+import { adminUsers, alertFoundersOverdue, founderUsers, FOUNDER_EMAILS, notify, sendSmartReminderStage } from "@/lib/notify";
 import { taskInclude, toTaskDTO } from "@/lib/dto";
 import { computeDelay, computeStage, daysBetween, isDone, startOfToday, waitingOn } from "@/lib/status";
 import {
@@ -37,49 +37,92 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
   // On-hold tasks are paused: no reminders, deadline alerts or brand nudges.
   const active = projects.filter((p) => !isDone(p) && !p.onHold);
 
-  // ── 1. Unified Daily Digest Email (Points 8, 9, 10: Overdue Escalation L1/L2/L3 + Inactive Tasks + Missing Details + Budget Alerts) ──
+  // ── 1. Unified Single Daily Briefing Email (One Refined Email per Team Member) ──
   const allTeamUsers = await prisma.user.findMany({ where: { active: true } });
   const allTeamEmails = allTeamUsers.map((u) => u.email);
 
-  // Group per-person digest items so each person receives ONE summarized email covering all their alerts
-  type DigestRow = [string, string, string, string, string];
+  type DigestItem = {
+    code: string;
+    title: string;
+    brand: string;
+    alertType: string;
+    stage: string;
+    dueOrStatus: string;
+    isOverdue: boolean;
+    isDueToday: boolean;
+  };
+
   const personDigests = new Map<
     string,
     {
       user: { id: string; name: string; email: string };
       maxEscalationLevel: number;
-      rows: DigestRow[];
+      items: DigestItem[];
     }
   >();
 
   const ensureDigest = (u: { id: string; name: string; email: string }) => {
     if (!personDigests.has(u.id)) {
-      personDigests.set(u.id, { user: u, maxEscalationLevel: 1, rows: [] });
+      personDigests.set(u.id, { user: u, maxEscalationLevel: 1, items: [] });
     }
     return personDigests.get(u.id)!;
   };
 
+  // Manager & Founder Escalation collections (Consolidated into 1 email each, never 5-6 emails)
+  const managerEscalations: { code: string; title: string; brand: string; assignee: string; delay: string; action: string }[] = [];
+  const founderEscalations: { code: string; title: string; brand: string; assignee: string; manager: string; delay: string }[] = [];
+
+  const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
+  const istHour = istNow.getHours();
+  const today6PmMs = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate(), 18, 0, 0).getTime();
+
   for (const p of active) {
-    // Point 9b: Unassigned task -> notify Admin so it gets allocated
+    // A. Unassigned task -> add to Manager action collection
     if (!p.assignee || !p.assignee.active) {
-      for (const adm of admins) {
-        const d = ensureDigest(adm);
-        d.rows.push([
-          p.title,
-          p.brand?.name ?? "—",
-          "🚨 UNASSIGNED TASK",
-          computeStage(p).label,
-          "Allocate owner",
-        ]);
-      }
+      managerEscalations.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        assignee: "Unassigned",
+        delay: "Unassigned Task",
+        action: "Assign lead editor & define deadline",
+      });
       continue;
     }
 
     const person = p.assignee;
     const dl = p.internalDeadline ? startOfToday(p.internalDeadline) : null;
+    const dayDiff = dl !== null ? daysBetween(today, dl) : null; // +1 = due tomorrow, 0 = due today, <0 = overdue
+    const hoursSinceLastUpdate = (now.getTime() - p.updatedAt.getTime()) / (1000 * 60 * 60);
+
+    // B. Critical Overdue check (Founder & Manager Escalations)
+    if (dayDiff !== null && dayDiff <= -2 && hoursSinceLastUpdate >= 24) {
+      // 48h+ past deadline with zero manager action -> Founder Escalation collection
+      founderEscalations.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        assignee: person.name,
+        manager: p.createdBy?.name || "Production Manager",
+        delay: `${Math.abs(dayDiff)} days overdue (No manager action for 24h)`,
+      });
+      result.escalated++;
+    } else if (dayDiff !== null && dayDiff === -1) {
+      // 1 day past deadline -> Manager Escalation collection
+      managerEscalations.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        assignee: person.name,
+        delay: "1 day overdue (Missed deadline & watchdog)",
+        action: "Intervene, rebalance scope, or extend deadline",
+      });
+      result.escalated++;
+    }
+
+    // C. Team Member Active Alerts (Categorized into single digest)
     const isOverdue = waitingOn(p) !== "BRAND" && dl !== null && dl < today;
 
-    // Point 8: Overdue Escalation (L1: Assignee -> L2: Manager + Assignee -> L3: Admin + Team)
     if (isOverdue) {
       await prisma.project.update({
         where: { id: p.id },
@@ -88,203 +131,210 @@ export async function runDailyAutomations(source: string, opts: { weekly?: boole
       const level = p.reminderCount + 1;
       const d = ensureDigest(person);
       d.maxEscalationLevel = Math.max(d.maxEscalationLevel, level);
-      d.rows.push([
-        p.title,
-        p.brand?.name ?? "—",
-        level === 1
-          ? "⏰ OVERDUE (Level 1 · Assignee)"
-          : level === 2
-            ? "⚠️ OVERDUE (Level 2 · Manager & Assignee)"
-            : "🚨 OVERDUE (Level 3 · Admin & Team)",
-        computeStage(p).label,
-        fmtDate(p.internalDeadline) || "Past due",
-      ]);
-    }
+      d.items.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        alertType:
+          level === 1
+            ? "⏰ OVERDUE (Level 1 · Action Required)"
+            : level === 2
+            ? "⚠️ OVERDUE (Level 2 · Manager Escalated)"
+            : "🚨 OVERDUE (Level 3 · Admin Escalated)",
+        stage: computeStage(p).label,
+        dueOrStatus: fmtDate(p.internalDeadline) || "Past due",
+        isOverdue: true,
+        isDueToday: false,
+      });
+    } else if (dayDiff === 0) {
+      // Due Today (10 AM Kickoff or Evening 6 PM - 8 PM Window)
+      const timingLabel =
+        istHour >= 20
+          ? "🚨 8:00 PM Watchdog: No progress logged between 6 PM - 8 PM"
+          : istHour >= 16
+          ? "🌆 6:00 PM Delivery Window: Upload export cut / log ETA"
+          : "☀️ DUE TODAY: Morning kickoff · Plan exports & start session timer";
 
-    // Point 9a: No movement / Inactivity alert (2 days urgent/high, 3 days medium, 6 days long-running)
-    const daysInactive = daysBetween(p.updatedAt, today);
-    const inactivityLimit =
-      p.priority === "urgent" || p.priority === "high" ? 2 : p.priority === "medium" ? 3 : 6;
-    if (daysInactive >= inactivityLimit) {
       const d = ensureDigest(person);
-      d.rows.push([
-        p.title,
-        p.brand?.name ?? "—",
-        `⏳ INACTIVE (${daysInactive}d no movement)`,
-        computeStage(p).label,
-        `Limit: ${inactivityLimit}d`,
-      ]);
+      d.items.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        alertType: timingLabel,
+        stage: computeStage(p).label,
+        dueOrStatus: "Due Today",
+        isOverdue: false,
+        isDueToday: true,
+      });
+      result.deadlineAlerts++;
+    } else if (dayDiff === 1) {
+      // Due Tomorrow (T-24h milestone)
+      const d = ensureDigest(person);
+      d.items.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        alertType: "⏳ DUE TOMORROW: 24h milestone · Confirm on track or request extension",
+        stage: computeStage(p).label,
+        dueOrStatus: fmtDate(p.internalDeadline) || "Tomorrow",
+        isOverdue: false,
+        isDueToday: false,
+      });
+      result.deadlineAlerts++;
     }
 
-    // Point 9c: Missing required details alert
+    // Inactive task alert (no updates for 2+ days)
+    const daysInactive = daysBetween(p.updatedAt, today);
+    const inactivityLimit = p.priority === "urgent" || p.priority === "high" ? 2 : p.priority === "medium" ? 3 : 6;
+    if (daysInactive >= inactivityLimit && !isOverdue && dayDiff !== 0) {
+      const d = ensureDigest(person);
+      d.items.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        alertType: `⏳ INACTIVE: ${daysInactive}d no activity (Limit: ${inactivityLimit}d)`,
+        stage: computeStage(p).label,
+        dueOrStatus: "Needs progress update",
+        isOverdue: false,
+        isDueToday: false,
+      });
+    }
+
+    // Missing required task details alert
     const missing: string[] = [];
     if (!p.internalDeadline) missing.push("Due Date");
     if (!p.campaignId) missing.push("Campaign");
     if (!p.storageId) missing.push("Hard Drive");
-    if (!p.context?.trim()) missing.push("Description");
+    if (!p.context?.trim()) missing.push("Description/Brief");
     if (!p.workType) missing.push("Work Type");
-    if (missing.length > 0) {
+    if (missing.length > 0 && !isOverdue && dayDiff !== 0) {
       const d = ensureDigest(person);
-      d.rows.push([
-        p.title,
-        p.brand?.name ?? "—",
-        `⚠️ MISSING DETAILS: ${missing.join(", ")}`,
-        computeStage(p).label,
-        "Fill required fields",
-      ]);
-    }
-
-    // Point 10: Budget Alerts (50% Manager, 75% Manager+Admin, 90%+ Admin + Red Flag)
-    const totalMinutes = p.timeEntries.reduce((sum, e) => sum + e.durationMinutes, 0);
-    const totalHours = totalMinutes / 60;
-    const estCost = totalHours * 400; // ₹300 labor + ₹100 overhead baseline
-    const budget = 50000;
-    const budgetPct = Math.round((estCost / budget) * 100);
-    if (budgetPct >= 50) {
-      const alertLabel =
-        budgetPct >= 90
-          ? `🚨 ${budgetPct}% BUDGET USED (Flagged Red)`
-          : budgetPct >= 75
-            ? `⚠️ ${budgetPct}% BUDGET USED (75%+ Alert)`
-            : `ℹ️ ${budgetPct}% BUDGET USED (50%+ Notice)`;
-      for (const mgr of managers) {
-        ensureDigest(mgr).rows.push([
-          p.title,
-          p.brand?.name ?? "—",
-          alertLabel,
-          computeStage(p).label,
-          `${budgetPct}% of ₹${budget.toLocaleString("en-IN")}`,
-        ]);
-      }
-      if (budgetPct >= 75) {
-        for (const adm of admins) {
-          ensureDigest(adm).rows.push([
-            p.title,
-            p.brand?.name ?? "—",
-            alertLabel,
-            computeStage(p).label,
-            `${budgetPct}% of ₹${budget.toLocaleString("en-IN")}`,
-          ]);
-        }
-      }
+      d.items.push({
+        code: p.code,
+        title: p.title,
+        brand: p.brand?.name ?? "—",
+        alertType: `ℹ️ MISSING REQUIRED FIELDS: ${missing.join(", ")}`,
+        stage: computeStage(p).label,
+        dueOrStatus: "Fill required fields",
+        isOverdue: false,
+        isDueToday: false,
+      });
     }
   }
 
-  // Send ONE consolidated digest email per person (Points 8, 9, 10)
+  // ── Dispatch EXACTLY ONE consolidated daily email per team member ──
   for (const [, digest] of personDigests) {
-    if (digest.rows.length === 0) continue;
-    const { user: person, maxEscalationLevel: level, rows } = digest;
+    if (digest.items.length === 0) continue;
+    const { user: person, maxEscalationLevel: level, items } = digest;
 
     let ccEmails: string[] | undefined = undefined;
-    let subjectPrefix = "📋 Daily Task & Alert Digest: ";
-    if (level === 2 && managerEmails.length) {
-      ccEmails = managerEmails;
-      subjectPrefix = "⚠️ Level 2 Escalation Digest (Manager + Assignee): ";
-      result.escalated++;
-    } else if (level >= 3 && adminEmails.length) {
-      ccEmails = [...new Set([...adminEmails, ...managerEmails, ...allTeamEmails])];
-      subjectPrefix = `🚨 Level 3 Critical Escalation Digest (Admin + Team): `;
-      result.escalated++;
+    let badgeText = "DAILY OPERATIONS BRIEFING";
+    let badgeTone = "blue";
+    let subject = `📋 TBM Daily Briefing: ${items.length} item${items.length > 1 ? "s" : ""} on your plate`;
+
+    const hasOverdue = items.some((i) => i.isOverdue);
+    const hasDueToday = items.some((i) => i.isDueToday);
+
+    if (hasOverdue) {
+      badgeText = "ACTION REQUIRED · OVERDUE ITEMS";
+      badgeTone = "red";
+      subject = `⚠️ TBM Daily Briefing: ${items.length} item${items.length > 1 ? "s" : ""} requiring attention (${items[0].code})`;
+      if (level === 2 && managerEmails.length) {
+        ccEmails = managerEmails;
+        badgeText = "LEVEL 2 ESCALATION · MANAGER NOTIFIED";
+        badgeTone = "orange";
+        subject = `⚠️ Level 2 Escalation Briefing: ${items.length} item${items.length > 1 ? "s" : ""} overdue`;
+        result.escalated++;
+      } else if (level >= 3 && adminEmails.length) {
+        ccEmails = [...new Set([...adminEmails, ...managerEmails, ...allTeamEmails])];
+        badgeText = "LEVEL 3 CRITICAL ESCALATION";
+        badgeTone = "red";
+        subject = `🚨 Level 3 Critical Escalation: ${items.length} item${items.length > 1 ? "s" : ""} requiring immediate intervention`;
+        result.escalated++;
+      }
+    } else if (hasDueToday) {
+      badgeText = "DEADLINE TODAY · 10 AM KICKOFF";
+      badgeTone = "amber";
+      subject = `☀️ TBM Morning Kickoff: Deliverables scheduled for delivery today`;
     }
 
-    const subject = `${subjectPrefix}${rows.length} item${rows.length > 1 ? "s" : ""} requiring attention`;
+    const rows: string[][] = items.map((i) => [
+      `[${i.code}] ${i.title}`,
+      i.brand,
+      i.alertType,
+      i.stage,
+      i.dueOrStatus,
+    ]);
+
     await sendMail(
       person.email,
       subject,
       emailHtml({
-        heading: `Hi ${person.name.split(" ")[0]}, your consolidated TBM Portal digest`,
+        heading: `Hi ${person.name.split(" ")[0]}, your consolidated daily delivery briefing`,
         intro:
-          "Here is your single summarized daily digest covering overdue tasks (L1/L2/L3 escalation), inactive tasks, missing mandatory task details, and project budget alerts:",
-        head: ["Task / Project", "Brand", "Alert Type & Missing Gaps", "Stage", "Status / Due"],
+          "Here is your single, consolidated daily briefing covering all your deliverables, milestone deadlines, and required actions for today:",
+        head: ["Deliverable & Key", "Brand", "Alert & Milestone Status", "Current Stage", "Due Date"],
         rows,
-        cta: { label: "Open My Tasks & Fix Highlighted Gaps", href: `${APP_URL}/my-tasks` },
+        cta: { label: "🚀 Open My Tasks & Log Progress", href: `${APP_URL}/my-tasks` },
+        footer: "The Bored Monkey Studio · Consolidated daily brief (1 email per team member).",
       }),
       ccEmails
     );
+
     await notify(person.id, subject, undefined, "/my-tasks");
     result.reminders++;
   }
 
-  // ── 2. Smart Deadline Reminder & Escalation Pipeline (Slack × Jira Style) ──
-  // Pipeline:
-  //   • T-24h before deadline -> Team Member (structured Slack/Jira card)
-  //   • Deadline Day 10:00 AM -> Team Member morning check-in
-  //   • Deadline Day 6:00 PM -> Team Member evening window check-in (6 PM - 8 PM)
-  //   • Deadline Day 8:00 PM (if nothing changed between 6 PM and 8 PM) -> Team Member urgent progress reminder
-  //   • Next Morning 10:00 AM (1 day past deadline) -> Reporting Manager Escalation (24h window to act)
-  //   • +24h after Manager Escalation with no action -> All 6 Founders (Pratik, Suraj, Sachin, Uday, Suraj Maurya, Monu)
-  const istNow = new Date(now.toLocaleString("en-US", { timeZone: "Asia/Kolkata" }));
-  const istHour = istNow.getHours();
-  const today6PmMs = new Date(istNow.getFullYear(), istNow.getMonth(), istNow.getDate(), 18, 0, 0).getTime();
-
-  for (const p of active) {
-    if (!p.assignee?.active || !p.internalDeadline) continue;
-    const dlDay = startOfToday(p.internalDeadline);
-    const dayDiff = daysBetween(today, dlDay); // +1 = due tomorrow (T-24h), 0 = due today, -1 = due yesterday (Next Morning 10 AM Manager), <= -2 = +24h after Manager (Founders)
-    const hoursSinceLastUpdate = (now.getTime() - p.updatedAt.getTime()) / (1000 * 60 * 60);
-
-    // Stage 6: 24h after Manager Reminder with NO action -> Escalate to ALL 6 FOUNDERS (Pratik, Suraj, Sachin, Uday, Suraj Maurya, Monu)
-    if (dayDiff <= -2 && hoursSinceLastUpdate >= 24) {
-      await sendSmartReminderStage(p, "FOUNDER_24H_ESCALATION");
-      result.escalated++;
-      continue;
-    }
-
-    // Stage 5: Next Morning at 10:00 AM IST (1 day past deadline) -> Reporting Manager gets reminder
-    if (dayDiff === -1) {
-      await sendSmartReminderStage(p, "NEXT_DAY_10AM_MANAGER");
-      result.escalated++;
-      continue;
-    }
-
-    // Stages 2, 3, 4: Same Day of Deadline (10:00 AM -> 6:00 PM -> 8:00 PM if nothing changed since 6 PM)
-    if (dayDiff === 0) {
-      if (istHour >= 20) {
-        // 8:00 PM check: did anything change between 6:00 PM and 8:00 PM?
-        const updatedSince6Pm = p.updatedAt.getTime() >= today6PmMs;
-        if (!updatedSince6Pm) {
-          await sendSmartReminderStage(p, "DEADLINE_8PM_NO_CHANGE");
-          result.deadlineAlerts++;
-        }
-      } else if (istHour >= 16) {
-        // 6:00 PM check-in
-        await sendSmartReminderStage(p, "DEADLINE_6PM");
-        result.deadlineAlerts++;
-      } else {
-        // 10:00 AM morning check-in
-        await sendSmartReminderStage(p, "DEADLINE_10AM");
-        result.deadlineAlerts++;
-      }
-      continue;
-    }
-
-    // Stage 1: 24 Hours Before Deadline (T-24h) -> Clear, defined Slack/Jira card to Team Member
-    if (dayDiff === 1) {
-      await sendSmartReminderStage(p, "BEFORE_24H");
-      result.deadlineAlerts++;
-      continue;
-    }
+  // ── Dispatch EXACTLY ONE consolidated Manager Action Digest (if any tasks need manager attention) ──
+  if (managerEscalations.length > 0 && managerEmails.length > 0) {
+    const mgrSubject = `⚠️ Production Management Briefing: ${managerEscalations.length} deliverable${managerEscalations.length > 1 ? "s" : ""} requiring manager intervention`;
+    await sendMail(
+      managerEmails,
+      mgrSubject,
+      emailHtml({
+        heading: `Production Management Action Digest`,
+        intro:
+          "The following deliverables require managerial intervention (unassigned tasks, missed deadlines, or Level 2 escalations past the watchdog window):",
+        head: ["Issue Key & Title", "Brand", "Assigned Editor", "Delay Status", "Required Action"],
+        rows: managerEscalations.map((m) => [
+          `[${m.code}] ${m.title}`,
+          m.brand,
+          m.assignee,
+          m.delay,
+          m.action,
+        ]),
+        cta: { label: "🛠️ Open Manager Project Board", href: `${APP_URL}/projects` },
+        footer: "The Bored Monkey Studio · Consolidated manager alert digest.",
+      })
+    );
   }
 
-  // 2b. General 3-day deadline heads-up
-  const horizon = new Date(today);
-  horizon.setDate(today.getDate() + DEADLINE_ALERT_DAYS);
-  const dueSoon = active.filter((p) => p.assignee?.active && p.internalDeadline && p.internalDeadline >= today && p.internalDeadline <= horizon);
-  const dueByPerson = new Map<string, typeof dueSoon>();
-  for (const p of dueSoon) dueByPerson.set(p.assigneeId!, [...(dueByPerson.get(p.assigneeId!) ?? []), p]);
-  for (const [, list] of dueByPerson) {
-    const person = list[0].assignee!;
+  // ── Dispatch EXACTLY ONE consolidated Founder Escalation Digest (if any tasks are >48h overdue) ──
+  if (founderEscalations.length > 0) {
+    const founders = await founderUsers();
+    const founderEmailList = [...new Set([...FOUNDER_EMAILS, ...founders.map((f) => f.email)])];
+    const founderSubject = `🚨 [P0 Founder Escalation] ${founderEscalations.length} deliverable${founderEscalations.length > 1 ? "s" : ""} delayed 48h+ with no manager resolution`;
+
     await sendMail(
-      person.email,
-      `⏰ ${list.length} deadline${list.length > 1 ? "s" : ""} in the next ${DEADLINE_ALERT_DAYS} days`,
+      founderEmailList,
+      founderSubject,
       emailHtml({
-        heading: "Coming up",
-        head: ["Task", "Brand", "Stage", "Due"],
-        rows: list.map((p) => [p.title, p.brand?.name ?? "—", computeStage(p).label, `${fmtDate(p.internalDeadline)} (${daysBetween(today, p.internalDeadline!) === 0 ? "today" : `in ${daysBetween(today, p.internalDeadline!)}d`})`]),
-        cta: { label: "Open my tasks", href: `${APP_URL}/my-tasks` },
+        heading: `Executive Founder Delivery Alert (48h+ Inaction)`,
+        intro:
+          "Attention Founders (Pratik, Suraj, Sachin, Uday, Suraj Maurya, Monu): The following deliverables have missed their defined deadline and have remained unresolved for 24+ hours following manager escalation:",
+        head: ["Deliverable & Key", "Brand", "Assigned Editor", "Reporting Manager", "Delay Details"],
+        rows: founderEscalations.map((f) => [
+          `[${f.code}] ${f.title}`,
+          f.brand,
+          f.assignee,
+          f.manager,
+          f.delay,
+        ]),
+        cta: { label: "🔍 Review Studio Deliverables Board", href: `${APP_URL}/projects` },
+        footer: "The Bored Monkey Studio · Direct executive escalation to Founders.",
       }),
+      managerEmails
     );
-    result.deadlineAlerts++;
   }
 
   // ── 3. Brand nudge ──
