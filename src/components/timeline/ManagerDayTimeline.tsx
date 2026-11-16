@@ -92,8 +92,10 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
     try {
       const res = await syncMyGoogleCalendar();
       if (res.ok) {
-        setStatusMessage(`Synced ${res.synced} tasks to Google Calendar!`);
-        setTimeout(() => setStatusMessage(null), 3000);
+        setStatusMessage(`Synced ${res.synced} task${res.synced === 1 ? "" : "s"} to Google Calendar!`);
+        setTimeout(() => setStatusMessage(null), 3500);
+      } else {
+        alert(res.message || "Failed to sync to Google Calendar");
       }
     } finally {
       setGcalSyncing(false);

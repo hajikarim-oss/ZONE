@@ -169,7 +169,7 @@ function buildEventPayload(project: {
   };
 }
 
-export async function syncProjectToGoogleCalendar(projectId: string): Promise<boolean> {
+export async function syncProjectToGoogleCalendar(projectId: string, targetUserId?: string): Promise<{ success: boolean; error?: string }> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     include: {
@@ -184,11 +184,13 @@ export async function syncProjectToGoogleCalendar(projectId: string): Promise<bo
     },
   });
 
-  if (!project || !project.assignee) return false;
-  if (!project.assignee.googleCalendarSync || !project.assignee.googleRefreshToken) return false;
+  if (!project) return { success: false, error: "Task not found" };
 
-  const accessToken = await getValidAccessToken(project.assignee.id);
-  if (!accessToken) return false;
+  const syncUserId = targetUserId || project.assignee?.id;
+  if (!syncUserId) return { success: false, error: "No user assigned to sync with" };
+
+  const accessToken = await getValidAccessToken(syncUserId);
+  if (!accessToken) return { success: false, error: "Not authenticated with Google Calendar or token expired" };
 
   const payload = buildEventPayload(project);
 
@@ -204,7 +206,7 @@ export async function syncProjectToGoogleCalendar(projectId: string): Promise<bo
         body: JSON.stringify(payload),
       });
 
-      if (patchRes.ok) return true;
+      if (patchRes.ok) return { success: true };
 
       if (patchRes.status === 404) {
         // Event was deleted in Google Calendar, re-create it
@@ -223,8 +225,14 @@ export async function syncProjectToGoogleCalendar(projectId: string): Promise<bo
             where: { id: projectId },
             data: { googleCalendarEventId: created.id },
           });
-          return true;
+          return { success: true };
+        } else {
+          const errBody = await createRes.json().catch(() => ({}));
+          return { success: false, error: errBody?.error?.message || `HTTP ${createRes.status}` };
         }
+      } else {
+        const errBody = await patchRes.json().catch(() => ({}));
+        return { success: false, error: errBody?.error?.message || `HTTP ${patchRes.status}` };
       }
     } else {
       // Create new event
@@ -243,14 +251,16 @@ export async function syncProjectToGoogleCalendar(projectId: string): Promise<bo
           where: { id: projectId },
           data: { googleCalendarEventId: created.id },
         });
-        return true;
+        return { success: true };
+      } else {
+        const errBody = await createRes.json().catch(() => ({}));
+        return { success: false, error: errBody?.error?.message || `HTTP ${createRes.status}` };
       }
     }
-  } catch (err) {
+  } catch (err: any) {
     console.error(`[google-calendar] Failed to sync project ${projectId}:`, err);
+    return { success: false, error: err?.message || "Network exception during sync" };
   }
-
-  return false;
 }
 
 export async function deleteProjectFromGoogleCalendar(projectId: string): Promise<boolean> {
@@ -380,8 +390,12 @@ export async function syncAllUserTasksToGoogleCalendar(userId: string): Promise<
   let synced = 0;
   let lastError: string | undefined;
   for (const t of tasks) {
-    const ok = await syncProjectToGoogleCalendar(t.id);
-    if (ok) synced++;
+    const res = await syncProjectToGoogleCalendar(t.id, userId);
+    if (res.success) {
+      synced++;
+    } else if (res.error && !lastError) {
+      lastError = res.error;
+    }
   }
 
   return { synced, total: tasks.length, error: lastError };
