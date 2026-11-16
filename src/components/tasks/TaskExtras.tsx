@@ -160,13 +160,42 @@ export function Subtasks({
   const done = list.filter((s) => s.done).length;
   const active = people.filter((p) => p.active);
 
+  const SUBTASK_TIMER_KEY = "tbm_active_subtask_timer";
+
+  // Wall-clock accurate subtask timer (drift-free, background & reload resilient)
   useEffect(() => {
-    if (!subtaskTimerActive) return;
-    const interval = setInterval(() => {
-      setSubtaskTimerSeconds((s) => s + 1);
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [subtaskTimerActive]);
+    function syncSubtaskTimer() {
+      try {
+        const raw = localStorage.getItem(SUBTASK_TIMER_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.subtaskId && parsed?.startedAt) {
+            setSubtaskTimerActive(parsed.subtaskId);
+            setSubtaskTimerSeconds(Math.max(0, Math.floor((Date.now() - parsed.startedAt) / 1000)));
+            return;
+          }
+        }
+      } catch {}
+      setSubtaskTimerActive(null);
+      setSubtaskTimerSeconds(0);
+    }
+
+    syncSubtaskTimer();
+    const interval = setInterval(syncSubtaskTimer, 1000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") syncSubtaskTimer();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
+    window.addEventListener("storage", syncSubtaskTimer);
+
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
+      window.removeEventListener("storage", syncSubtaskTimer);
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -219,7 +248,18 @@ export function Subtasks({
   async function handleToggleSubtaskTimer(subtaskId: string) {
     if (subtaskTimerActive === subtaskId) {
       // Stop and log
-      const mins = Math.max(1, Math.round(subtaskTimerSeconds / 60));
+      let startedAt = 0;
+      try {
+        const raw = localStorage.getItem(SUBTASK_TIMER_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed?.startedAt) startedAt = parsed.startedAt;
+        }
+        localStorage.removeItem(SUBTASK_TIMER_KEY);
+      } catch {}
+
+      const totalElapsedSecs = startedAt > 0 ? Math.max(1, Math.floor((Date.now() - startedAt) / 1000)) : subtaskTimerSeconds;
+      const mins = Math.max(1, Math.round(totalElapsedSecs / 60));
       setSubtaskTimerActive(null);
       setSubtaskTimerSeconds(0);
       try {
@@ -235,6 +275,10 @@ export function Subtasks({
         onError(err instanceof Error ? err.message : "Couldn't log subtask time");
       }
     } else {
+      const now = Date.now();
+      try {
+        localStorage.setItem(SUBTASK_TIMER_KEY, JSON.stringify({ subtaskId, projectId, startedAt: now }));
+      } catch {}
       setSubtaskTimerActive(subtaskId);
       setSubtaskTimerSeconds(0);
     }

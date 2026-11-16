@@ -53,11 +53,18 @@ export default function DashboardWorkTracker({ tasks, currentUserId, isManager }
 
     sync();
     const interval = setInterval(sync, 1000);
+    const onVis = () => {
+      if (document.visibilityState === "visible") sync();
+    };
+    document.addEventListener("visibilitychange", onVis);
+    window.addEventListener("focus", onVis);
     window.addEventListener("tbm_session_change", sync);
     window.addEventListener("storage", sync);
 
     return () => {
       clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVis);
+      window.removeEventListener("focus", onVis);
       window.removeEventListener("tbm_session_change", sync);
       window.removeEventListener("storage", sync);
     };

@@ -126,60 +126,63 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
   const [stopModalBusy, setStopModalBusy] = useState(false);
 
   useEffect(() => {
-    const sync = () => {
+    let interval: ReturnType<typeof setInterval> | null = null;
+
+    const tick = () => {
       const s = getActiveSession();
       if (s && s.taskId === t.id) {
         setSessionActive(true);
-        setSessionSeconds(Math.max(0, Math.floor((Date.now() - s.startedAt) / 1000)));
-        setSessionLimitSeconds(s.limitSeconds ?? STANDARD_SESSION_LIMIT_SECONDS);
+        const elapsed = Math.max(0, Math.floor((Date.now() - s.startedAt) / 1000));
+        setSessionSeconds(elapsed);
+        const limit = s.limitSeconds ?? STANDARD_SESSION_LIMIT_SECONDS;
+        setSessionLimitSeconds(limit);
+
+        if (elapsed >= limit) {
+          setSessionLimitPromptOpen(true);
+        }
+        // Auto-stop if user hasn't responded within grace window (prevents overnight runaway timers)
+        if (elapsed >= limit + SESSION_GRACE_SECONDS) {
+          const cappedMins = Math.max(1, Math.round(limit / 60));
+          setActiveSession(null);
+          setSessionActive(false);
+          setSessionLimitPromptOpen(false);
+          stopWorkSession({
+            projectId: t.id,
+            durationMinutes: cappedMins,
+            workType: t.workType || "Assembly Edit",
+            notes: `Auto-stopped at standard session limit (${Math.round(limit / 3600)}h) — no user response`,
+          })
+            .then((res) => {
+              setTimeEntries((prev) => [res.entry, ...(prev ?? [])]);
+              onUpdate(t.id, { totalDurationMinutes: (t.totalDurationMinutes || 0) + cappedMins });
+            })
+            .catch(() => {});
+        }
       } else {
         setSessionActive(false);
+        setSessionSeconds(0);
       }
     };
-    sync();
-    window.addEventListener("tbm_session_change", sync);
-    window.addEventListener("storage", sync);
-    return () => {
-      window.removeEventListener("tbm_session_change", sync);
-      window.removeEventListener("storage", sync);
-    };
-  }, [t.id]);
 
-  useEffect(() => {
-    let interval: ReturnType<typeof setInterval> | null = null;
-    if (sessionActive) {
-      interval = setInterval(() => {
-        setSessionSeconds((s) => {
-          const next = s + 1;
-          if (next >= sessionLimitSeconds) {
-            setSessionLimitPromptOpen(true);
-          }
-          // Auto-stop if user hasn't responded within grace window (prevents overnight runaway timers)
-          if (next >= sessionLimitSeconds + SESSION_GRACE_SECONDS) {
-            const cappedMins = Math.max(5, Math.round(sessionLimitSeconds / 60));
-            setActiveSession(null);
-            setSessionActive(false);
-            setSessionLimitPromptOpen(false);
-            stopWorkSession({
-              projectId: t.id,
-              durationMinutes: cappedMins,
-              workType: t.workType || "Assembly Edit",
-              notes: `Auto-stopped at standard session limit (${Math.round(sessionLimitSeconds / 3600)}h) — no user response`,
-            })
-              .then((res) => {
-                setTimeEntries((prev) => [res.entry, ...(prev ?? [])]);
-                onUpdate(t.id, { totalDurationMinutes: (t.totalDurationMinutes || 0) + cappedMins });
-              })
-              .catch(() => {});
-          }
-          return next;
-        });
-      }, 1000);
-    }
+    tick();
+    interval = setInterval(tick, 1000);
+
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") tick();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    window.addEventListener("focus", onVisibility);
+    window.addEventListener("tbm_session_change", tick);
+    window.addEventListener("storage", tick);
+
     return () => {
       if (interval) clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibility);
+      window.removeEventListener("focus", onVisibility);
+      window.removeEventListener("tbm_session_change", tick);
+      window.removeEventListener("storage", tick);
     };
-  }, [sessionActive, sessionLimitSeconds, t.id, t.workType, t.totalDurationMinutes, onUpdate]);
+  }, [t.id, t.workType, t.totalDurationMinutes, onUpdate]);
 
   function handleExtendSession(extraHours: number) {
     const updated = extendActiveSession(extraHours);
@@ -216,7 +219,9 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
         setErr(err instanceof Error ? err.message : "Failed to start live session");
       }
     } else {
-      const mins = Math.max(5, Math.round(sessionSeconds / 60));
+      const s = getActiveSession();
+      const currentSecs = s ? Math.max(1, Math.floor((Date.now() - s.startedAt) / 1000)) : sessionSeconds;
+      const mins = Math.max(1, Math.round(currentSecs / 60));
       setStopModalMinutes(mins);
       setStopModalWorkType(t.workType || "Assembly Edit");
       setStopModalNotes("");
