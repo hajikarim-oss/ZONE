@@ -176,7 +176,7 @@ export default async function HomePage() {
             </Link>
           </SectionBar>
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 pt-3">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 pt-2">
             {projects.map((b) => {
               const isFav = favoriteProjects.some((f) => f.id === b.id);
               const count = openByBrand.get(b.id) ?? 0;
@@ -184,29 +184,27 @@ export default async function HomePage() {
                 <Link
                   key={b.id}
                   href={`/brands/${b.id}`}
-                  className="group relative flex flex-col justify-between rounded-xl border border-stone-200/90 bg-white p-3.5 shadow-2xs transition hover:border-slate-900 hover:shadow-xs dark:border-[#2C3B53] dark:bg-[#161B22]"
+                  className="group flex items-center gap-2.5 rounded-lg border border-stone-200/80 bg-white px-2.5 py-2 shadow-2xs transition hover:border-blue-500/40 hover:bg-blue-50/20 dark:border-[#2C3B53] dark:bg-[#161B22] dark:hover:bg-white/5"
                 >
-                  <div className="flex items-start justify-between gap-2">
-                    <span
-                      className="flex size-8 shrink-0 items-center justify-center rounded-md text-[13px] font-bold text-white shadow-2xs"
-                      style={{ backgroundColor: b.color || "#6366f1" }}
-                    >
-                      {b.name.slice(0, 1).toUpperCase()}
-                    </span>
+                  <span
+                    className="flex size-7 shrink-0 items-center justify-center rounded-md text-[11px] font-bold text-white shadow-2xs"
+                    style={{ backgroundColor: b.color || "#6366f1" }}
+                  >
+                    {b.name.slice(0, 1).toUpperCase()}
+                  </span>
+                  <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-1">
-                      {isFav && <span className="text-amber-500 text-[11px]" title="Starred Brand">★</span>}
-                      <span className="font-mono text-[10.5px] font-semibold rounded bg-stone-100 dark:bg-white/10 px-1.5 py-0.5 text-slate-600 dark:text-slate-300">
-                        {count} open
+                      <span className="truncate text-[12px] font-semibold text-slate-900 group-hover:text-blue-600 transition-colors dark:text-white dark:group-hover:text-blue-400">
+                        {b.name}
                       </span>
+                      {isFav && <span className="text-amber-500 text-[10px] shrink-0">★</span>}
                     </div>
-                  </div>
-                  <div className="mt-3">
-                    <div className="truncate text-[13px] font-bold text-slate-950 group-hover:text-blue-600 transition-colors dark:text-white dark:group-hover:text-blue-400">
-                      {b.name}
-                    </div>
-                    <div className="mt-0.5 text-[11px] text-slate-400 flex items-center justify-between">
-                      <span>Creative Brand</span>
-                      <span className="font-semibold text-blue-600 opacity-0 group-hover:opacity-100 transition-opacity">Open →</span>
+                    <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono">
+                      {count > 0 ? (
+                        <span className="text-blue-600 dark:text-blue-400 font-medium">{count} open</span>
+                      ) : (
+                        <span>0 open</span>
+                      )}
                     </div>
                   </div>
                 </Link>
