@@ -220,8 +220,8 @@ export default function ProjectDashboardView({
       const avgMinsPerVideo = pTasks.length > 0 ? Math.round(mins / pTasks.length) : 0;
       const onTimeScore = pTasks.length > 0 ? Math.round(((pTasks.length - late) / pTasks.length) * 100) : 100;
 
-      // Real-time activity state
-      const isLiveNow = pTasks.some((t) => t.editStatus === "In Progress" || (t.startAt && !t.endAt));
+      // Real-time activity state: only active when live work session timer is running
+      const isLiveNow = pTasks.some((t) => Boolean(t.startAt && !t.endAt));
 
       return {
         person: p,

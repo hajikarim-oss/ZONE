@@ -123,22 +123,29 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
     const personTasks = activeTasks.filter((t) => t.assigneeId === personId);
     if (!personTasks.length) return null;
 
-    // Check if any task has startAt/endAt covering this hour
+    // 1. Live Active Session: editor is currently running a live timer right now
+    const activeLiveTask = personTasks.find((t) => t.startAt && !t.endAt);
+    if (activeLiveTask) {
+      const nowH = new Date().getHours();
+      // Highlight the active live session on the current hour
+      if (hour === nowH) return activeLiveTask;
+    }
+
+    // 2. Scheduled or Logged Sessions today: check if startAt and endAt cover this specific hour
     for (const task of personTasks) {
-      if (task.startAt) {
+      if (task.startAt && task.endAt) {
         const start = new Date(task.startAt);
-        const end = task.endAt ? new Date(task.endAt) : new Date(start.getTime() + 4 * 60 * 60 * 1000);
-        const startH = start.getHours();
-        const endH = end.getHours() || 21;
-        if (hour >= startH && hour <= endH) return task;
+        const end = new Date(task.endAt);
+        const todayStr = new Date().toISOString().slice(0, 10);
+        if (start.toISOString().slice(0, 10) === todayStr) {
+          const startH = start.getHours();
+          const endH = end.getHours() || startH + 1;
+          if (hour >= startH && hour <= endH) return task;
+        }
       }
     }
 
-    // Fallback: spread active tasks across standard workday
-    const slotIndex = hour < 14 ? 0 : hour < 18 ? 1 : 2;
-    if (personTasks[slotIndex]) return personTasks[slotIndex];
-    if (personTasks[0] && hour >= 10 && hour <= 19) return personTasks[0];
-
+    // Otherwise, editor is free and available
     return null;
   }
 
@@ -193,20 +200,19 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
     : [];
   const freeMembers = snapshotTasks.filter((x) => !x.task);
   const workingNowMembers = snapshotTasks.filter(
-    (x) => x.task && (x.task.editStatus === "In Progress" || (x.task.startAt && !x.task.endAt))
+    (x) => x.task && Boolean(x.task.startAt && !x.task.endAt)
   );
   const loggedHoursMembers = snapshotTasks.filter(
     (x) =>
       x.task &&
       x.task.totalDurationMinutes > 0 &&
-      !(x.task.editStatus === "In Progress" || (x.task.startAt && !x.task.endAt))
+      !Boolean(x.task.startAt && !x.task.endAt)
   );
   const notStartedMembers = snapshotTasks.filter(
     (x) =>
       x.task &&
-      !x.task.startAt &&
-      x.task.totalDurationMinutes === 0 &&
-      x.task.editStatus !== "In Progress"
+      !Boolean(x.task.startAt && !x.task.endAt) &&
+      x.task.totalDurationMinutes === 0
   );
 
   return (
@@ -320,11 +326,7 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
             <div className="mt-2.5 pt-2.5 border-t border-line grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-2">
               {people.map((p) => {
                 const currentTask = getPersonHourTask(p.id, activeHourOverview);
-                const isWorkingNow = Boolean(
-                  currentTask &&
-                    (currentTask.editStatus === "In Progress" ||
-                      (currentTask.startAt && !currentTask.endAt))
-                );
+                const isWorkingNow = Boolean(currentTask && currentTask.startAt && !currentTask.endAt);
                 const hasHours = Boolean(currentTask && currentTask.totalDurationMinutes > 0);
 
                 return (
@@ -589,9 +591,9 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
 
                                 {/* Live Daily Progress Telemetry */}
                                 <div className="flex items-center justify-between text-[10px] pt-0.5">
-                                  {task.editStatus === "In Progress" || (task.startAt && !task.endAt) ? (
+                                  {task.startAt && !task.endAt ? (
                                     <span className="inline-flex items-center gap-1 text-[9.5px] font-bold text-amber-600 bg-amber-50 dark:bg-amber-950/40 px-1.5 py-0.5 rounded border border-amber-500/20">
-                                      <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" /> Working Now
+                                      <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" /> Working Now (Live)
                                     </span>
                                   ) : task.totalDurationMinutes > 0 ? (
                                     <span className="inline-flex items-center gap-1 text-[9.5px] font-semibold text-blue-600 bg-blue-50 dark:bg-blue-950/40 px-1.5 py-0.5 rounded">
@@ -683,8 +685,7 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
                   <span className="text-muted text-[11px] font-semibold uppercase tracking-wider">
                     Daily Progress Telemetry
                   </span>
-                  {selectedTaskForReassign.editStatus === "In Progress" ||
-                  (selectedTaskForReassign.startAt && !selectedTaskForReassign.endAt) ? (
+                  {Boolean(selectedTaskForReassign.startAt && !selectedTaskForReassign.endAt) ? (
                     <span className="inline-flex items-center gap-1 rounded bg-amber-500/15 border border-amber-500/30 px-2 py-0.5 text-[10px] font-bold text-amber-700 dark:text-amber-400">
                       <span className="size-1.5 rounded-full bg-amber-500 animate-pulse" />
                       Working Now (Live)
@@ -888,10 +889,7 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
         const memberAllTasks = tasks.filter((t) => t.assigneeId === selectedMemberView.id);
         const memberActiveTasks = memberAllTasks.filter((t) => !isDone(t));
         const memberDoneTasks = memberAllTasks.filter((t) => isDone(t));
-        const workingRightNowTask =
-          memberActiveTasks.find(
-            (t) => t.editStatus === "In Progress" || (t.startAt && !t.endAt)
-          ) || getPersonHourTask(selectedMemberView.id, defaultHour());
+        const workingRightNowTask = memberActiveTasks.find((t) => t.startAt && !t.endAt);
         const totalLoggedMinutes = memberAllTasks.reduce(
           (sum, t) => sum + (t.totalDurationMinutes || 0),
           0
