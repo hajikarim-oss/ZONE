@@ -29,6 +29,7 @@ export type TaskDTO = {
   endAt: string | null;
   storageId: string | null;
   storageName: string | null;
+  googleCalendarEventId?: string | null;
   goalId: string | null;
   goalTitle: string | null;
   briefStage: string;
@@ -237,6 +238,7 @@ export function toTaskDTO(p: TaskRow): TaskDTO {
     endAt: p.endAt?.toISOString() ?? null,
     storageId: p.storageId ?? null,
     storageName: p.storage?.name ?? null,
+    googleCalendarEventId: p.googleCalendarEventId ?? null,
     goalId: p.goalId ?? null,
     goalTitle: p.goal?.title ?? null,
     briefStage: p.briefStage,

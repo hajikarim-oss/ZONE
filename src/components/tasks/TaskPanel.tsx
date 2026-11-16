@@ -1,9 +1,9 @@
 "use client";
 
-import { AlertTriangle, Archive, ArchiveRestore, Calendar, CalendarDays, Check, CheckSquare, ChevronDown, Clock, ExternalLink, Flame, FolderGit2, Link2, Lock, MessageSquare, Paperclip, PanelRightClose, Pause, Play, Plus, Send, Sparkles, Target, Trash2, UserPlus, Wand2, X } from "lucide-react";
+import { AlertTriangle, Archive, ArchiveRestore, Calendar, CalendarCheck, CalendarDays, Check, CheckSquare, ChevronDown, Clock, ExternalLink, Flame, FolderGit2, Link2, Loader2, Lock, MessageSquare, Paperclip, PanelRightClose, Pause, Play, Plus, Send, Sparkles, Target, Trash2, UserPlus, Wand2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, useTransition } from "react";
 import Avatar from "@/components/Avatar";
-import { addCollaborator, addTimeEntry, addUpdate, createGoal, deleteTask, deleteTimeEntry, deleteUpdate, getTaskThread, getTimeEntries, removeCollaborator, requestDeadlineExtension, setArchived, startWorkSession, stopWorkSession, type ActivityDTO, type AttachmentDTO, type SubtaskDTO, type TimeEntryDTO, type UpdateDTO } from "@/lib/actions";
+import { addCollaborator, addTimeEntry, addUpdate, createGoal, deleteTask, deleteTimeEntry, deleteUpdate, getTaskThread, getTimeEntries, removeCollaborator, requestDeadlineExtension, setArchived, startWorkSession, stopWorkSession, syncTaskToGoogleCalendar, type ActivityDTO, type AttachmentDTO, type SubtaskDTO, type TimeEntryDTO, type UpdateDTO } from "@/lib/actions";
 import {
   getActiveSession,
   setActiveSession,
@@ -282,6 +282,24 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
   const [rescheduleReason, setRescheduleReason] = useState("");
   const [rescheduleBusy, setRescheduleBusy] = useState(false);
   const [completenessDismissed, setCompletenessDismissed] = useState(false);
+  const [calSyncing, setCalSyncing] = useState(false);
+  const [calSynced, setCalSynced] = useState(Boolean(t.googleCalendarEventId));
+
+  async function handleSyncTaskCalendar() {
+    setCalSyncing(true);
+    try {
+      const res = await syncTaskToGoogleCalendar(t.id);
+      if (res.ok) {
+        setCalSynced(true);
+      } else {
+        alert(res.message || "Failed to sync to Google Calendar. Make sure Google Calendar is connected in My tasks.");
+      }
+    } catch (e: any) {
+      alert(e?.message || "Failed to sync to Google Calendar");
+    } finally {
+      setCalSyncing(false);
+    }
+  }
 
   // Daily Standup Form State
   const [standupProgress, setStandupProgress] = useState("");
@@ -653,6 +671,25 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
             >
               <Clock className="h-3.5 w-3.5" />
               <span className="hidden sm:inline">Log work</span>
+            </button>
+
+            <button
+              className={cn(
+                "jira-btn-subtle px-2 py-1 text-[12px] flex items-center gap-1 transition",
+                calSynced ? "text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40" : "text-muted hover:text-ink"
+              )}
+              title={calSynced ? "Deliverable synced to Google Calendar" : "Sync deliverable to Google Calendar"}
+              onClick={handleSyncTaskCalendar}
+              disabled={calSyncing}
+            >
+              {calSyncing ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin text-[#0052CC]" />
+              ) : calSynced ? (
+                <CalendarCheck className="h-3.5 w-3.5 text-emerald-600" />
+              ) : (
+                <Calendar className="h-3.5 w-3.5 text-[#0052CC]" />
+              )}
+              <span className="hidden sm:inline">{calSyncing ? "Syncing…" : calSynced ? "Calendar Synced" : "Sync Calendar"}</span>
             </button>
 
             <button

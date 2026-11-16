@@ -1286,6 +1286,19 @@ export async function deleteGoal(id: string) {
   revalidatePath("/goals");
 }
 
+export async function syncTaskToGoogleCalendar(projectId: string): Promise<{ ok: boolean; message?: string }> {
+  await requireTeamUser();
+  try {
+    const success = await syncProjectToGoogleCalendar(projectId);
+    if (!success) {
+      return { ok: false, message: "Google Calendar not connected or sync failed. Connect Google Calendar from My tasks." };
+    }
+    return { ok: true, message: "Task synced to Google Calendar!" };
+  } catch (err: any) {
+    return { ok: false, message: err?.message || "Sync failed" };
+  }
+}
+
 export async function syncMyGoogleCalendar(): Promise<{ ok: boolean; synced: number; total: number; message?: string }> {
   const me = await requireTeamUser();
   try {
