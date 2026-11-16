@@ -256,6 +256,14 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
   if (after.finalApproval === "Approved" && before.finalApproval !== "Approved") await onFinalApproved(after);
   if (after.deliveryStatus === "Project Closed" && before.deliveryStatus !== "Project Closed") await onClosed(after);
 
+  // If reassigned to a different person, clean up from previous assignee's calendar
+  if (before.assigneeId && after.assigneeId !== before.assigneeId && before.googleCalendarEventId) {
+    try {
+      await deleteProjectFromGoogleCalendar(after.id, before.assigneeId);
+      await prisma.project.update({ where: { id: after.id }, data: { googleCalendarEventId: null } });
+    } catch {}
+  }
+
   // Sync to Google Calendar (if assignee has Google Calendar connected)
   await syncProjectToGoogleCalendar(after.id);
   });

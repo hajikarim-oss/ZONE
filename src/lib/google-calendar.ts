@@ -263,27 +263,21 @@ export async function syncProjectToGoogleCalendar(projectId: string, targetUserI
   }
 }
 
-export async function deleteProjectFromGoogleCalendar(projectId: string): Promise<boolean> {
+export async function deleteProjectFromGoogleCalendar(projectId: string, explicitUserId?: string): Promise<boolean> {
   const project = await prisma.project.findUnique({
     where: { id: projectId },
     select: {
       id: true,
       googleCalendarEventId: true,
       assigneeId: true,
-      assignee: {
-        select: {
-          id: true,
-          googleRefreshToken: true,
-          googleCalendarSync: true,
-        },
-      },
     },
   });
 
-  if (!project || !project.googleCalendarEventId || !project.assignee) return false;
-  if (!project.assignee.googleCalendarSync || !project.assignee.googleRefreshToken) return false;
+  if (!project || !project.googleCalendarEventId) return false;
+  const targetUserId = explicitUserId || project.assigneeId;
+  if (!targetUserId) return false;
 
-  const accessToken = await getValidAccessToken(project.assignee.id);
+  const accessToken = await getValidAccessToken(targetUserId);
   if (!accessToken) return false;
 
   try {
