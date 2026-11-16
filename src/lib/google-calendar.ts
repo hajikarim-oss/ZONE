@@ -1,6 +1,6 @@
 import { prisma } from "@/lib/prisma";
 import { APP_URL } from "@/lib/mailer";
-import { isDone, computeStage } from "@/lib/status";
+import { isDone, computeStage, type StatusInput } from "@/lib/status";
 
 const GOOGLE_TOKEN_URL = "https://oauth2.googleapis.com/token";
 const GOOGLE_CALENDAR_API = "https://www.googleapis.com/calendar/v3/calendars/primary/events";
@@ -89,47 +89,110 @@ function nextDay(d: Date): Date {
   return n;
 }
 
+function formatGCalDate(d: Date | null): string {
+  if (!d) return "—";
+  return new Intl.DateTimeFormat("en-GB", {
+    day: "numeric",
+    month: "short",
+    year: "numeric",
+    timeZone: "Asia/Kolkata",
+  }).format(new Date(d));
+}
+
 function buildEventPayload(project: {
   id: string;
   code: string;
   title: string;
   priority: string;
-  dept: string;
-  briefStage: string;
-  scriptStage: string;
-  preProStage: string;
-  shootStatus: string;
-  editStatus: string;
-  revisionRound: number;
-  finalApproval: string;
-  deliveryStatus: string;
-  internalDeadline: Date | null;
-  externalDeadline: Date | null;
-  startAt: Date | null;
-  endAt: Date | null;
-  context: string | null;
-  brand: { name: string } | null;
+  dept?: string;
+  type?: string | null;
+  workType?: string | null;
+  briefStage?: string;
+  scriptStage?: string;
+  preProStage?: string;
+  shootStatus?: string;
+  editStatus?: string;
+  revisionRound?: number;
+  finalApproval?: string;
+  deliveryStatus?: string;
+  internalDeadline?: Date | null;
+  externalDeadline?: Date | null;
+  startAt?: Date | null;
+  endAt?: Date | null;
+  onHold?: boolean;
+  context?: string | null;
+  brand?: { name: string } | null;
+  campaign?: { name: string } | null;
+  assignee?: { name: string; email: string } | null;
+  collaborators?: { name: string }[];
+  storage?: { name: string; type?: string | null; location?: string | null } | null;
+  subtasks?: { title: string; done: boolean; assignee?: { name: string } | null }[];
 }) {
-  const done = isDone(project);
-  const stage = computeStage(project);
-  const summaryPrefix = done ? "✅ [DONE] " : "";
-  const brandSuffix = project.brand?.name ? ` (${project.brand.name})` : "";
+  const statusInput: StatusInput = {
+    briefStage: project.briefStage || "Not Started",
+    scriptStage: project.scriptStage || "Not Started",
+    preProStage: project.preProStage || "Not Started",
+    shootStatus: project.shootStatus || "Not Started",
+    editStatus: project.editStatus || "Open",
+    revisionRound: project.revisionRound ?? 0,
+    finalApproval: project.finalApproval || "Pending",
+    deliveryStatus: project.deliveryStatus || "Not Started",
+    internalDeadline: project.internalDeadline ?? null,
+    externalDeadline: project.externalDeadline ?? null,
+    onHold: Boolean(project.onHold),
+  };
+  const done = isDone(statusInput);
+  const stage = computeStage(statusInput);
+  const summaryPrefix = done ? "[COMPLETED] " : "";
+  const brandSuffix = project.brand?.name ? ` — ${project.brand.name}` : "";
   const summary = `${summaryPrefix}${project.code} · ${project.title}${brandSuffix}`;
 
   const taskUrl = `${APP_URL}/my-tasks?task=${project.id}`;
 
-  const description = [
-    `🎬 Task: ${project.code} · ${project.title}`,
-    `🏢 Brand: ${project.brand?.name ?? "—"}`,
-    `📌 Priority: ${project.priority}`,
-    `📊 Stage: ${stage.label}`,
-    `⚡ Dept: ${project.dept}`,
-    project.internalDeadline ? `⏰ Due Date: ${project.internalDeadline.toISOString().slice(0, 10)}` : "",
-    project.context ? `\n📝 Context:\n${project.context}` : "",
-    `\n🔗 Open in TBM Post-Production:\n${taskUrl}`,
-  ]
-    .filter(Boolean)
-    .join("\n");
+  const subtaskLines = (project.subtasks || []).map(
+    (st) => `  [${st.done ? "x" : " "}] ${st.title}${st.assignee?.name ? ` (${st.assignee.name})` : ""}`
+  );
+
+  const lines = [
+    `TBM POST-PRODUCTION DELIVERABLE`,
+    `========================================`,
+    `DELIVERABLE OVERVIEW`,
+    `• Code: ${project.code}`,
+    `• Title: ${project.title}`,
+    `• Brand: ${project.brand?.name || "General"}`,
+    project.campaign?.name ? `• Campaign: ${project.campaign.name}` : "",
+    project.type || project.workType ? `• Format: ${[project.type, project.workType].filter(Boolean).join(" · ")}` : "",
+    `• Priority: ${project.priority || "Medium"}`,
+    `• Department: ${project.dept || "Post Production"}`,
+    ``,
+    `WORKFLOW & DEADLINES`,
+    `• Pipeline Stage: ${stage.label}`,
+    `• Edit Status: ${project.editStatus || "Open"}`,
+    project.revisionRound ? `• Revision: Round ${project.revisionRound}` : "",
+    project.internalDeadline ? `• Internal Studio Due: ${formatGCalDate(project.internalDeadline)}` : "",
+    project.externalDeadline ? `• Client Final Delivery: ${formatGCalDate(project.externalDeadline)}` : "",
+    ``,
+    `TEAM & ASSIGNMENTS`,
+    `• Lead Editor: ${project.assignee?.name || "Unassigned"}`,
+    project.collaborators && project.collaborators.length > 0
+      ? `• Collaborators: ${project.collaborators.map((c) => c.name).join(", ")}`
+      : "",
+    subtaskLines.length > 0
+      ? `• Subtasks (${project.subtasks?.filter((s) => s.done).length}/${subtaskLines.length} done):\n${subtaskLines.join("\n")}`
+      : "",
+    ``,
+    project.storage
+      ? `ASSET STORAGE & HARD DRIVE\n• Master Drive: ${project.storage.name}${project.storage.type ? ` (${project.storage.type})` : ""}${project.storage.location ? ` [${project.storage.location}]` : ""}\n`
+      : "",
+    project.context?.trim()
+      ? `CREATIVE BRIEF & NOTES\n${project.context.trim()}\n`
+      : "",
+    `========================================`,
+    `STUDIO PORTAL DIRECT ACCESS:`,
+    `${taskUrl}`,
+  ].filter((line) => line !== null && line !== undefined);
+
+  const description = lines.filter((l, i, arr) => !(l === "" && arr[i - 1] === "")).join("\n");
 
   const colorId = done ? "8" : (PRIORITY_COLORS[project.priority] ?? "5");
 
@@ -174,9 +237,15 @@ export async function syncProjectToGoogleCalendar(projectId: string, targetUserI
     where: { id: projectId },
     include: {
       brand: { select: { name: true } },
+      campaign: { select: { name: true } },
+      storage: { select: { name: true, type: true, location: true } },
+      collaborators: { select: { name: true } },
+      subtasks: { select: { title: true, done: true, assignee: { select: { name: true } } } },
       assignee: {
         select: {
           id: true,
+          name: true,
+          email: true,
           googleRefreshToken: true,
           googleCalendarSync: true,
         },
