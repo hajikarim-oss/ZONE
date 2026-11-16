@@ -456,6 +456,43 @@ export async function onAssigned(p: P, assigner?: { id: string; name: string; em
   }
 }
 
+// Task Handover / Reassigned → Inform the previous assignee that the deliverable was transferred
+export async function onReassigned(
+  p: P,
+  prevAssignee: { id: string; name: string; email?: string | null },
+  newAssignee: { id: string; name: string },
+  reassignedBy: { id: string; name: string }
+) {
+  if (!prevAssignee || prevAssignee.id === newAssignee.id) return;
+
+  const title = `Handover Notice: ${p.code} reassigned to ${newAssignee.name}`;
+  const body = `"${p.title}" was reassigned from you to ${newAssignee.name} by ${reassignedBy.name}. You are no longer assigned as lead on this task.`;
+
+  await notify(prevAssignee.id, title, body, `/projects?task=${p.id}`);
+
+  if (prevAssignee.email) {
+    await sendMail(
+      prevAssignee.email,
+      `🔄 [Handover · ${p.code}] "${p.title}" reassigned to ${newAssignee.name}`,
+      slackJiraEmailHtml({
+        badgeText: "TASK HANDOVER · REASSIGNED",
+        badgeTone: "amber",
+        issueKey: p.code,
+        brandName: p.brand?.name,
+        heading: `Deliverable Handover: ${p.code}`,
+        intro: `"${p.title}" was reassigned from you to ${newAssignee.name} by ${reassignedBy.name}.`,
+        calloutTitle: "Status Update",
+        calloutBody: "You are no longer assigned as lead on this deliverable. You will not receive deadline reminders or escalation alerts for it.",
+        fields: [
+          { label: "Transferred To", value: newAssignee.name },
+          { label: "Reassigned By", value: reassignedBy.name },
+        ],
+        cta: { label: "View Deliverable", href: `${APP_URL}/projects?task=${p.id}` },
+      })
+    );
+  }
+}
+
 // Live session started → Notify assigner and assignee
 export async function onWorkSessionStarted(p: P, worker: { id: string; name: string }) {
   const timeStr = new Date().toLocaleTimeString("en-IN", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: "Asia/Kolkata" });

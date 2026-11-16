@@ -16,6 +16,7 @@ export type { TimeEntryDTO } from "@/lib/dto";
 import {
   notify,
   onAssigned,
+  onReassigned,
   onClosed,
   onFinalApproved,
   onFirstCutSent,
@@ -250,6 +251,15 @@ export async function updateTask(id: string, patch: Record<string, unknown>): Pr
     String(after.internalDeadline?.toISOString() ?? "") !== String(before.internalDeadline?.toISOString() ?? "");
   if (after.assigneeId && (after.assigneeId !== before.assigneeId || deadlineChanged)) {
     await onAssigned(after, me);
+  }
+
+  // If reassigned from someone else, notify previous assignee of handover
+  if (before.assigneeId && after.assigneeId && before.assigneeId !== after.assigneeId) {
+    const prevAssignee = await prisma.user.findUnique({ where: { id: before.assigneeId } });
+    const newAssignee = await prisma.user.findUnique({ where: { id: after.assigneeId } });
+    if (prevAssignee && newAssignee) {
+      await onReassigned(after, prevAssignee, newAssignee, me);
+    }
   }
   if (after.editStatus === "First Cut Sent" && before.editStatus !== "First Cut Sent") await onFirstCutSent(after);
   if (after.revisionRound >= REVISION_ALERT_ROUND && before.revisionRound < REVISION_ALERT_ROUND) await onRevisionAlert(after);

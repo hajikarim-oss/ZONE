@@ -766,6 +766,12 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
                     ))}
                 </select>
               </div>
+
+              {targetAssigneeId ? (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 p-2.5 text-[11.5px] text-amber-800 dark:text-amber-300">
+                  Handover Notice: <strong>{selectedTaskForReassign.assigneeName || "Previous assignee"}</strong> will be notified automatically that this deliverable has been handed over to <strong>{people.find((p) => p.id === targetAssigneeId)?.name}</strong>.
+                </div>
+              ) : null}
             </div>
 
             <div className="mt-5 flex items-center justify-between gap-2 border-t border-line pt-3">
@@ -843,6 +849,18 @@ export default function ManagerDayTimeline({ people, tasks }: Props) {
                   ))}
                 </select>
               </div>
+
+              {(() => {
+                const selectedTask = activeTasks.find((t) => t.id === quickAssignTaskId);
+                if (selectedTask?.assigneeName && selectedTask.assigneeId !== quickAssignPerson.id) {
+                  return (
+                    <div className="rounded-lg bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-900/60 p-2.5 text-[11.5px] text-amber-800 dark:text-amber-300">
+                      Handover Notice: <strong>{selectedTask.assigneeName}</strong> will be notified automatically that this deliverable has been handed over to <strong>{quickAssignPerson.name}</strong>.
+                    </div>
+                  );
+                }
+                return null;
+              })()}
             </div>
 
             <div className="mt-5 flex justify-end gap-2 border-t border-line pt-3">
