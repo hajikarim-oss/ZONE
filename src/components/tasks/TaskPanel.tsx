@@ -33,7 +33,7 @@ type Props = {
   goals?: GoalDTO[];
   onGoalCreated?: (g: GoalDTO) => void;
   onStorageCreated: (s: StorageDTO) => void;
-  viewer: { id: string; role: string; seeAll: boolean; admin: boolean; brandIds?: string[] };
+  viewer: { id: string; role: string; seeAll: boolean; admin: boolean; brandIds?: string[]; canSeeFinancials?: boolean };
   onClose: () => void;
   onUpdate: (id: string, patch: Record<string, unknown>) => void;
   onRemoved: (id: string) => void;
@@ -1040,13 +1040,15 @@ export default function TaskPanel({ task: t, people, brands, storages, goals = [
                   />
                 </div>
 
-                {/* Point 10: Live Project Costing (Budget vs Actual Cost) */}
-                <ProjectCostingPanel
-                  task={t}
-                  people={people}
-                  timeEntries={timeEntries}
-                  viewer={viewer}
-                />
+                {/* Point 10: Live Project Costing (Budget vs Actual Cost) — Master / Financial Admins only */}
+                {viewer.canSeeFinancials && (
+                  <ProjectCostingPanel
+                    task={t}
+                    people={people}
+                    timeEntries={timeEntries}
+                    viewer={viewer}
+                  />
+                )}
 
                 {/* Attachments */}
                 <div ref={filesRef} className="space-y-1.5">

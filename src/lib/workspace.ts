@@ -2,7 +2,7 @@ import type { Prisma, User } from "@prisma/client";
 import type { GoalDTO, StorageDTO } from "@/lib/dto";
 import { prisma } from "@/lib/prisma";
 import { forViewer, taskInclude, toBrands, toPeople, toTaskDTO } from "@/lib/dto";
-import { canSeeAll, isAdmin, visibleToMember } from "@/lib/rbac";
+import { canSeeAll, canSeeFinancials, isAdmin, visibleToMember } from "@/lib/rbac";
 
 // Data every task view needs: the tasks, plus people/brands/goals/storages for dropdowns.
 export async function loadWorkspace(me: User & { brandIds: string[] }, where: Prisma.ProjectWhereInput) {
@@ -49,6 +49,15 @@ export async function loadWorkspace(me: User & { brandIds: string[] }, where: Pr
       })),
     })) as StorageDTO[],
     goals: goals as GoalDTO[],
-    viewer: { id: me.id, role: me.role, seeAll: canSeeAll(me), admin: isAdmin(me), department: me.department, brandIds: me.brandIds },
+    viewer: {
+      id: me.id,
+      email: me.email,
+      role: me.role,
+      seeAll: canSeeAll(me),
+      admin: isAdmin(me),
+      canSeeFinancials: canSeeFinancials(me),
+      department: me.department,
+      brandIds: me.brandIds,
+    },
   };
 }

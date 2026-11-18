@@ -123,7 +123,15 @@ function AddForm() {
   );
 }
 
-export default function TeamManagementClient({ users, currentUserId }: { users: TeamUser[]; currentUserId: string }) {
+export default function TeamManagementClient({
+  users,
+  currentUserId,
+  canSeeFinancials = true,
+}: {
+  users: TeamUser[];
+  currentUserId: string;
+  canSeeFinancials?: boolean;
+}) {
   const [rows, setRows] = useState(users);
   const [error, setError] = useState<string | null>(null);
   const [, start] = useTransition();
@@ -158,8 +166,12 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
               <th className="px-3 py-2 font-medium">Name</th>
               <th className="px-2 py-2 font-medium">Department</th>
               <th className="px-2 py-2 font-medium">Role</th>
-              <th className="px-2 py-2 font-medium">Monthly Cost (₹) · 160h</th>
-              <th className="px-2 py-2 font-medium">Hourly Rate (₹/hr)</th>
+              {canSeeFinancials && (
+                <>
+                  <th className="px-2 py-2 font-medium">Monthly Cost (₹) · 160h</th>
+                  <th className="px-2 py-2 font-medium">Hourly Rate (₹/hr)</th>
+                </>
+              )}
               <th className="px-2 py-2 font-medium">Status</th>
               <th className="px-2 py-2 text-right font-medium">Open tasks</th>
               <th className="px-2 py-2 font-medium">Login</th>
@@ -191,43 +203,47 @@ export default function TeamManagementClient({ users, currentUserId }: { users: 
                     {ROLES.map((r) => <option key={r} value={r}>{ROLE_LABEL[r]}</option>)}
                   </select>
                 </td>
-                <td className="px-2">
-                  <div className="flex items-center gap-1 font-mono text-[12px]">
-                    <span className="text-muted">₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      step={1000}
-                      defaultValue={(u.hourlyRate || 300) * 160}
-                      key={`${u.id}-monthly-${u.hourlyRate}`}
-                      onBlur={(e) => {
-                        const monthly = Number(e.target.value) || 0;
-                        const hr = Math.round(monthly / 160);
-                        if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
-                      }}
-                      className="w-24 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-semibold"
-                      title="Monthly cost (Admin only) — divides by 160 productive hours/month"
-                    />
-                  </div>
-                </td>
-                <td className="px-2">
-                  <div className="flex items-center gap-1 font-mono text-[12px]">
-                    <span className="text-muted">₹</span>
-                    <input
-                      type="number"
-                      min={0}
-                      defaultValue={u.hourlyRate || 300}
-                      key={`${u.id}-hr-${u.hourlyRate}`}
-                      onBlur={(e) => {
-                        const hr = Number(e.target.value) || 0;
-                        if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
-                      }}
-                      className="w-16 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-bold text-[#0052CC]"
-                      title="Hourly cost in ₹/hr (Admin only)"
-                    />
-                    <span className="text-[11px] text-muted">/hr</span>
-                  </div>
-                </td>
+                {canSeeFinancials && (
+                  <>
+                    <td className="px-2">
+                      <div className="flex items-center gap-1 font-mono text-[12px]">
+                        <span className="text-muted">₹</span>
+                        <input
+                          type="number"
+                          min={0}
+                          step={1000}
+                          defaultValue={(u.hourlyRate || 300) * 160}
+                          key={`${u.id}-monthly-${u.hourlyRate}`}
+                          onBlur={(e) => {
+                            const monthly = Number(e.target.value) || 0;
+                            const hr = Math.round(monthly / 160);
+                            if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
+                          }}
+                          className="w-24 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-semibold"
+                          title="Monthly cost (Admin only) — divides by 160 productive hours/month"
+                        />
+                      </div>
+                    </td>
+                    <td className="px-2">
+                      <div className="flex items-center gap-1 font-mono text-[12px]">
+                        <span className="text-muted">₹</span>
+                        <input
+                          type="number"
+                          min={0}
+                          defaultValue={u.hourlyRate || 300}
+                          key={`${u.id}-hr-${u.hourlyRate}`}
+                          onBlur={(e) => {
+                            const hr = Number(e.target.value) || 0;
+                            if (hr !== u.hourlyRate) patch(u.id, { hourlyRate: hr });
+                          }}
+                          className="w-16 rounded border border-line bg-surface px-1.5 py-0.5 text-[12px] font-bold text-[#0052CC]"
+                          title="Hourly cost in ₹/hr (Admin only)"
+                        />
+                        <span className="text-[11px] text-muted">/hr</span>
+                      </div>
+                    </td>
+                  </>
+                )}
                 <td className="px-2">
                   <button
                     disabled={u.id === currentUserId}

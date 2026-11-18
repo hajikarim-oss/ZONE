@@ -6,7 +6,7 @@ import { JiraStatusLozenge, JiraEpicPill } from "@/components/jira/JiraBits";
 import { Page, PageTopbar, StatStrip, Stat, SectionBar, TopbarAction, PageBody } from "@/components/layout/Page";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canSeeAll } from "@/lib/rbac";
+import { canSeeAll, canSeeFinancials } from "@/lib/rbac";
 import { BOARD_COLUMNS, boardColumn, computeDelay, isDone } from "@/lib/status";
 import { fmtDate, cn } from "@/lib/utils";
 
@@ -15,6 +15,7 @@ import { fmtDate, cn } from "@/lib/utils";
 export default async function PortfoliosPage() {
   const me = await requireTeamPage();
   if (!canSeeAll(me)) redirect("/home");
+  const hasFinancials = canSeeFinancials(me);
 
   const brands = await prisma.brand.findMany({
     orderBy: { name: "asc" },
@@ -95,7 +96,7 @@ export default async function PortfoliosPage() {
       </PageTopbar>
 
       {/* Edge-to-edge StatStrip */}
-      <StatStrip cols={4}>
+      <StatStrip cols={hasFinancials ? 4 : 3}>
         <Stat
           label="Active Brands"
           value={brands.length}
@@ -111,14 +112,17 @@ export default async function PortfoliosPage() {
           value={`${overallHours}h`}
           sub="Time entries logged"
           tone="blue"
+          last={!hasFinancials}
         />
-        <Stat
-          label="Total Production Cost"
-          value={`₹${overallCost.toLocaleString("en-IN")}`}
-          sub="Spend and payouts"
-          tone="green"
-          last
-        />
+        {hasFinancials && (
+          <Stat
+            label="Total Production Cost"
+            value={`₹${overallCost.toLocaleString("en-IN")}`}
+            sub="Spend and payouts"
+            tone="green"
+            last
+          />
+        )}
       </StatStrip>
 
       {/* Page Body */}
@@ -134,7 +138,7 @@ export default async function PortfoliosPage() {
                   <th className="px-3 py-2.5">Campaigns</th>
                   <th className="px-3 py-2.5">Deliverable Progress</th>
                   <th className="px-3 py-2.5 text-right">Hours Logged</th>
-                  <th className="px-3 py-2.5 text-right">Production Cost</th>
+                  {hasFinancials && <th className="px-3 py-2.5 text-right">Production Cost</th>}
                   <th className="px-3 py-2.5">Health</th>
                   <th className="px-3 py-2.5">Next Due</th>
                   <th className="px-4 py-2.5 text-right">Action</th>
@@ -215,9 +219,11 @@ export default async function PortfoliosPage() {
                       </td>
 
                       {/* Cost */}
-                      <td className="px-3 py-3 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
-                        ₹{totalCost.toLocaleString("en-IN")}
-                      </td>
+                      {hasFinancials && (
+                        <td className="px-3 py-3 text-right tabular-nums font-semibold text-emerald-600 dark:text-emerald-400 font-mono">
+                          ₹{totalCost.toLocaleString("en-IN")}
+                        </td>
+                      )}
 
                       {/* Health */}
                       <td className="px-3 py-3">

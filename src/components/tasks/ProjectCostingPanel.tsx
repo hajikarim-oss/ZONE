@@ -64,9 +64,14 @@ export default function ProjectCostingPanel({
   task: TaskDTO;
   people: PersonDTO[];
   timeEntries: TimeEntryDTO[] | null;
-  viewer: { id: string; role: string; seeAll: boolean; admin: boolean };
+  viewer: { id: string; role: string; seeAll: boolean; admin: boolean; canSeeFinancials?: boolean };
 }) {
-  const { admin, seeAll, id: viewerId } = viewer;
+  const { admin, seeAll, id: viewerId, canSeeFinancials } = viewer;
+
+  // Protect financial privacy: Only Master Admins / Founders can access financial calculations
+  if (canSeeFinancials === false) {
+    return null;
+  }
   const [config, setConfig] = useState<CostConfig>({
     budgetInr: 50000,
     plannedHours: 40,

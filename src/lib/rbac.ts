@@ -5,7 +5,7 @@
 //            Can add their own tasks (like Asana's My tasks).
 
 // brandIds = brand workspaces the person is a member of.
-export type Viewer = { id: string; role: string; department?: string; brandIds?: string[] };
+export type Viewer = { id: string; role: string; email?: string; department?: string; brandIds?: string[] };
 
 // The parts of a task that decide who can see / edit it.
 export type Access = {
@@ -20,6 +20,29 @@ export const isAdmin = (v: Viewer) => v.role === "ADMIN";
 export const canSeeAll = (v: Viewer) => v.role === "ADMIN" || v.role === "MANAGER";
 export const canManageTeam = (v: Viewer) => v.role === "ADMIN";
 export const canManageBrands = (v: Viewer) => v.role === "ADMIN" || v.role === "MANAGER";
+
+// Financial Panel & Costing Privacy:
+// Master Admins / Founders have full access to financial panels, project costing, budgets, hourly rates & margins.
+// Operational Admins & Managers (e.g. Simran) do NOT have financial panel access.
+export const FOUNDER_EMAILS = new Set([
+  "haji.karim@theboredmonkey.com",
+  "sachin@theboredmonkey.com",
+  "pratik@theboredmonkey.com",
+  "suraj@theboredmonkey.com",
+  "uday@theboredmonkey.com",
+  "suraj.maurya@theboredmonkey.com",
+  "monu@theboredmonkey.com",
+]);
+
+export function canSeeFinancials(v: Viewer): boolean {
+  if (v.department === "Founder") return true;
+  if (v.email) {
+    const email = v.email.toLowerCase();
+    if (FOUNDER_EMAILS.has(email)) return true;
+    if (email.startsWith("simran.d@")) return false;
+  }
+  return v.role === "ADMIN" && v.department === "Founder";
+}
 // Everyone on the team can add tasks; team members' tasks are assigned to themselves.
 export const canCreateProjects = (_v: Viewer) => true;
 

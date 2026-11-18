@@ -3,6 +3,7 @@ import fs from "fs";
 import path from "path";
 import { currentUser } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
+import { canSeeFinancials } from "@/lib/rbac";
 
 export const dynamic = "force-dynamic";
 
@@ -68,7 +69,7 @@ export async function GET(req: Request) {
   const projectId = url.searchParams.get("projectId");
   const store = readMetaStore();
 
-  const isAdmin = me.role === "ADMIN";
+  const canViewFinancials = canSeeFinancials(me);
 
   if (projectId) {
     const costConfig = store.projectCosts[projectId] || {
@@ -80,24 +81,24 @@ export async function GET(req: Request) {
     };
 
     return NextResponse.json({
-      costConfig: isAdmin
+      costConfig: canViewFinancials
         ? costConfig
         : {
-            // Point 10 Privacy: Team members see budget % and hours, not sensitive rupee salary breakdowns
-            budget: costConfig.budget,
+            // Point 10 Privacy: Non-financial roles cannot see sensitive rupee salary breakdowns
+            budget: 0,
             plannedHours: costConfig.plannedHours,
-            plannedDirectCost: costConfig.plannedDirectCost,
-            overheadRate: costConfig.overheadRate,
-            directCosts: costConfig.directCosts,
+            plannedDirectCost: 0,
+            overheadRate: 0,
+            directCosts: [],
           },
       subtaskExtras: store.subtaskExtras,
       globalOverhead: store.globalOverhead,
-      userMonthlyCosts: isAdmin ? store.userMonthlyCosts : {},
+      userMonthlyCosts: canViewFinancials ? store.userMonthlyCosts : {},
     });
   }
 
   return NextResponse.json({
-    store: isAdmin ? store : { subtaskExtras: store.subtaskExtras, globalOverhead: store.globalOverhead },
+    store: canViewFinancials ? store : { subtaskExtras: store.subtaskExtras, globalOverhead: store.globalOverhead },
   });
 }
 

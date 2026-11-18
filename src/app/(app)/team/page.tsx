@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import TeamManagementClient from "@/components/admin/TeamManagementClient";
 import { requireTeamPage } from "@/lib/auth";
 import { prisma } from "@/lib/prisma";
-import { canManageTeam } from "@/lib/rbac";
+import { canManageTeam, canSeeFinancials } from "@/lib/rbac";
 import { isDone } from "@/lib/status";
 
 // Same Team page as the Campaign Panel (add person, role, password, remove)
@@ -25,6 +25,7 @@ export default async function TeamPage() {
         </p>
         <TeamManagementClient
           currentUserId={me.id}
+          canSeeFinancials={canSeeFinancials(me)}
           users={users.map((u) => ({
             id: u.id,
             name: u.name,
